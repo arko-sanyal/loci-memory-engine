@@ -8,8 +8,8 @@ from rag.loader import load_documents
 from rag.loci import LociEngine
 
 
-def _chunk_id(source: str, start_index: int) -> str:
-    return hashlib.sha256(f"{source}::{start_index}".encode()).hexdigest()
+def _chunk_id(source: str, page: int, start_index: int) -> str:
+    return hashlib.sha256(f"{source}::{page}::{start_index}".encode()).hexdigest()
 
 
 def ingest(data_dir: str | None = None) -> int:
@@ -19,7 +19,11 @@ def ingest(data_dir: str | None = None) -> int:
 
     texts = [chunk.page_content for chunk in chunks]
     ids = [
-        _chunk_id(chunk.metadata["source"], chunk.metadata["start_index"])
+        _chunk_id(
+            chunk.metadata["source"],
+            chunk.metadata.get("page", 0),
+            chunk.metadata["start_index"],
+        )
         for chunk in chunks
     ]
     metadatas = [chunk.metadata for chunk in chunks]

@@ -3,6 +3,30 @@ import pytest
 from rag import config
 from rag.pipeline import ingest, query
 
+TWO_PAGE_PDF = b"""%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R 6 0 R]/Count 2>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/Resources<</Font<</F1 4 0 R>>>>/MediaBox[0 0 200 200]/Contents 5 0 R>>endobj
+4 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
+5 0 obj<</Length 40>>
+stream
+BT /F1 24 Tf 10 100 Td (Page one text) Tj ET
+endstream
+endobj
+6 0 obj<</Type/Page/Parent 2 0 R/Resources<</Font<</F1 4 0 R>>>>/MediaBox[0 0 200 200]/Contents 7 0 R>>endobj
+7 0 obj<</Length 40>>
+stream
+BT /F1 24 Tf 10 100 Td (Page two text) Tj ET
+endstream
+endobj
+xref
+0 8
+0000000000 65535 f
+trailer<</Size 8/Root 1 0 R>>
+startxref
+0
+%%EOF"""
+
 try:
     import ollama as _ollama_client
 
@@ -51,6 +75,19 @@ def test_ingest_is_idempotent_on_rerun(isolated_store):
 
     assert second_count == 1
     assert len(results) == 1
+
+
+@requires_ollama
+def test_ingest_assigns_distinct_ids_to_chunks_from_different_pdf_pages(isolated_store):
+    data_dir = isolated_store / "data"
+    data_dir.mkdir()
+    (data_dir / "two_page.pdf").write_bytes(TWO_PAGE_PDF)
+
+    # Each page's first chunk gets start_index == 0, so a source+start_index-only
+    # id would collide across pages. This must not raise chromadb.errors.DuplicateIDError.
+    count = ingest(str(data_dir))
+
+    assert count == 2
 
 
 @requires_ollama
