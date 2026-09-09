@@ -25,7 +25,7 @@ def test_main_query_prints_answer_and_sources(monkeypatch, capsys):
     monkeypatch.setattr(
         cli.pipeline,
         "query",
-        lambda question, top_k=5: {"answer": "Paris.", "sources": ["a.txt", "b.txt"]},
+        lambda question, top_k=None: {"answer": "Paris.", "sources": ["a.txt", "b.txt"]},
     )
 
     exit_code = cli.main(["query", "What is the capital of France?"])
@@ -35,6 +35,34 @@ def test_main_query_prints_answer_and_sources(monkeypatch, capsys):
     assert "Paris." in out
     assert "a.txt" in out
     assert "b.txt" in out
+
+
+def test_main_query_defaults_top_k_to_none_so_card_can_auto_classify(monkeypatch):
+    captured = {}
+
+    def fake_query(question, top_k=None):
+        captured["top_k"] = top_k
+        return {"answer": "x", "sources": []}
+
+    monkeypatch.setattr(cli.pipeline, "query", fake_query)
+
+    cli.main(["query", "What is the capital of France?"])
+
+    assert captured["top_k"] is None
+
+
+def test_main_query_passes_through_explicit_top_k(monkeypatch):
+    captured = {}
+
+    def fake_query(question, top_k=None):
+        captured["top_k"] = top_k
+        return {"answer": "x", "sources": []}
+
+    monkeypatch.setattr(cli.pipeline, "query", fake_query)
+
+    cli.main(["query", "What is the capital of France?", "--top-k", "8"])
+
+    assert captured["top_k"] == 8
 
 
 def test_main_reports_clear_error_instead_of_crashing(monkeypatch, capsys):

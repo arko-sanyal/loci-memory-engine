@@ -13,7 +13,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     query_parser = subparsers.add_parser("query", help="Ask a question over ingested documents")
     query_parser.add_argument("question", help="Question to ask")
-    query_parser.add_argument("--top-k", type=int, default=5, help="Number of chunks to retrieve")
+    query_parser.add_argument(
+        "--top-k",
+        type=int,
+        default=None,
+        help="Number of chunks to retrieve (default: auto, via category-adaptive recall depth)",
+    )
 
     return parser
 

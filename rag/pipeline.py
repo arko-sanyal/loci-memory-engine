@@ -1,6 +1,7 @@
 import hashlib
 
 from rag import config
+from rag.card import apply_ranking_strategy, classify_query_category, recall_depth
 from rag.chunker import chunk_documents
 from rag.embeddings import embed
 from rag.llm import generate
@@ -34,10 +35,14 @@ def ingest(data_dir: str | None = None) -> int:
     return len(chunks)
 
 
-def query(question: str, top_k: int = 5) -> dict:
+def query(question: str, top_k: int | None = None) -> dict:
+    category = classify_query_category(question)
+    k = top_k if top_k is not None else recall_depth(category)
+
     engine = LociEngine(path=config.CHROMA_DB_PATH)
     [query_embedding] = embed([question])
-    results = engine.query(query_embedding, top_k=top_k)
+    results = engine.query(query_embedding, top_k=k)
+    results = apply_ranking_strategy(category, results)
 
     context = "\n\n".join(f"[{i + 1}] {r['text']}" for i, r in enumerate(results))
     prompt = (
@@ -48,4 +53,4 @@ def query(question: str, top_k: int = 5) -> dict:
     answer = generate(prompt)
     sources = sorted({r["metadata"]["source"] for r in results})
 
-    return {"answer": answer, "sources": sources}
+    return {"answer": answer, "sources": sources, "category": category, "recall_depth": k}
