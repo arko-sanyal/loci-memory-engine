@@ -1,9 +1,29 @@
 from pathlib import Path
 
-from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_core.documents import Document
+from pypdf import PdfReader
 
-_LOADERS = {".pdf": PyPDFLoader, ".txt": TextLoader, ".md": TextLoader}
+
+def _load_pdf(file_path: str) -> list[Document]:
+    """Load PDF file and return list of Document objects."""
+    reader = PdfReader(file_path)
+    documents = []
+    for page_num, page in enumerate(reader.pages):
+        text = page.extract_text()
+        documents.append(
+            Document(page_content=text, metadata={"source": file_path, "page": page_num})
+        )
+    return documents
+
+
+def _load_text(file_path: str) -> list[Document]:
+    """Load text file (.txt or .md) and return list of Document objects."""
+    with open(file_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    return [Document(page_content=content, metadata={"source": file_path})]
+
+
+_LOADERS = {".pdf": _load_pdf, ".txt": _load_text, ".md": _load_text}
 
 
 def load_documents(data_dir: str) -> list[Document]:
@@ -21,5 +41,5 @@ def load_documents(data_dir: str) -> list[Document]:
 
     documents = []
     for file in sorted(files):
-        documents.extend(_LOADERS[file.suffix.lower()](str(file)).load())
+        documents.extend(_LOADERS[file.suffix.lower()](str(file)))
     return documents

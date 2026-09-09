@@ -6,7 +6,9 @@ from rag.embeddings import embed
 try:
     import ollama as _ollama_client
 
-    _ollama_client.Client(host=config.OLLAMA_HOST).list()
+    _ollama_client.Client(
+        host=config.OLLAMA_HOST, timeout=config.OLLAMA_CONNECT_TIMEOUT_SECONDS
+    ).list()
     OLLAMA_AVAILABLE = True
 except Exception:
     OLLAMA_AVAILABLE = False

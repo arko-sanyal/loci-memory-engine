@@ -30,7 +30,9 @@ startxref
 try:
     import ollama as _ollama_client
 
-    _ollama_client.Client(host=config.OLLAMA_HOST).list()
+    _ollama_client.Client(
+        host=config.OLLAMA_HOST, timeout=config.OLLAMA_CONNECT_TIMEOUT_SECONDS
+    ).list()
     OLLAMA_AVAILABLE = True
 except Exception:
     OLLAMA_AVAILABLE = False
@@ -88,6 +90,28 @@ def test_ingest_assigns_distinct_ids_to_chunks_from_different_pdf_pages(isolated
     count = ingest(str(data_dir))
 
     assert count == 2
+
+
+@requires_ollama
+def test_query_uses_category_adaptive_recall_depth(isolated_store):
+    data_dir = isolated_store / "data"
+    data_dir.mkdir()
+    fruits = [
+        "apple", "banana", "cherry", "date", "elderberry", "fig",
+        "grape", "honeydew", "kiwi", "lemon", "mango", "nectarine",
+    ]
+    for fruit in fruits:
+        (data_dir / f"{fruit}.txt").write_text(f"{fruit} is a kind of fruit.")
+    ingest(str(data_dir))
+
+    info_result = query("What fruit is this?")
+    multi_result = query("Summarize and compare all the fruits across the documents")
+
+    assert info_result["category"] == "information_extraction"
+    assert info_result["recall_depth"] == 5
+    assert multi_result["category"] == "multi_session_reasoning"
+    assert multi_result["recall_depth"] == 10
+    assert len(multi_result["sources"]) > len(info_result["sources"])
 
 
 @requires_ollama
