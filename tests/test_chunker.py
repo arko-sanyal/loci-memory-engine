@@ -28,3 +28,13 @@ def test_chunk_documents_does_not_split_short_text():
 
     assert len(chunks) == 1
     assert chunks[0].page_content == "a short document"
+
+
+def test_chunk_documents_tags_each_chunk_with_a_distinct_position():
+    long_text = "word " * 300
+    doc = Document(page_content=long_text, metadata={"source": "long.txt"})
+
+    chunks = chunk_documents([doc])
+    positions = [chunk.metadata["start_index"] for chunk in chunks]
+
+    assert len(set(positions)) == len(chunks)
