@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import sqlite3
 import struct
@@ -30,6 +31,12 @@ def _to_fts5_query(text: str) -> str | None:
 
 class VectorStore:
     def __init__(self, path: str):
+        if os.path.isdir(path):
+            raise RuntimeError(
+                f"{path!r} is a directory (looks like a leftover Chroma store) — "
+                "VectorStore needs a file path; point RAG_CHROMA_DB_PATH at a new "
+                "file, e.g. ./loci.db"
+            )
         self._conn = sqlite3.connect(path)
         self._conn.enable_load_extension(True)
         import sqlite_vec

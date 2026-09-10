@@ -30,6 +30,13 @@ def test_recall_increments_heat_on_repeated_access(engine):
 
     assert second["heat"] == pytest.approx(3.0)  # clamped at HEAT_MAX
 
+    # A third recall would push an *unclamped* heat to 1.0+1.0+1.0+1.0 = 4.0,
+    # which is indistinguishable from the correctly-clamped 3.0 after only two
+    # recalls above. Asserting here too makes this test actually discriminate
+    # a missing clamp.
+    third = engine.recall("battery_capacity")
+    assert third["heat"] == pytest.approx(3.0)  # still clamped at HEAT_MAX
+
 
 def test_add_fact_and_get_facts_via_facade(engine):
     engine.remember("server_config")

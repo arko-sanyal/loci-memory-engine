@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from loci_engine.vectors import VectorStore
 
 
@@ -153,3 +155,11 @@ def test_rrf_tie_break_is_deterministic_by_ascending_chunk_id(tmp_path):
             embedding=query_embedding, top_k=1, query_text="zephyr"
         )
         assert results[0]["id"] == "s"
+
+
+def test_init_raises_helpful_error_when_path_is_a_directory(tmp_path):
+    leftover_chroma_dir = tmp_path / "chroma_db"
+    leftover_chroma_dir.mkdir()
+
+    with pytest.raises(RuntimeError, match="directory"):
+        VectorStore(str(leftover_chroma_dir))

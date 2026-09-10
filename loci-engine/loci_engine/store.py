@@ -1,6 +1,6 @@
 import time
 
-from loci_engine.heat import apply_increment, decay
+from loci_engine.heat import apply_increment, decay, tier
 
 
 def _decayed_heat(row_heat: float, last_used: float, now: float) -> float:
@@ -22,8 +22,7 @@ def remember_entity(
         VALUES (?, ?, ?, 1.0, 1.0, 0, ?)
         ON CONFLICT(entity) DO UPDATE SET
             gist = COALESCE(excluded.gist, isymprev.gist),
-            expanded = COALESCE(excluded.expanded, isymprev.expanded),
-            last_used = excluded.last_used
+            expanded = COALESCE(excluded.expanded, isymprev.expanded)
         """,
         (entity, gist, expanded, now),
     )
@@ -40,10 +39,12 @@ def get_entity(conn, entity: str, now: float | None = None) -> dict | None:
     if row is None:
         return None
     entity_, gist, heat, confidence, uses, last_used, expanded = row
+    decayed_heat = _decayed_heat(heat, last_used, now)
     return {
         "entity": entity_,
         "gist": gist,
-        "heat": _decayed_heat(heat, last_used, now),
+        "heat": decayed_heat,
+        "tier": tier(decayed_heat),
         "confidence": confidence,
         "uses": uses,
         "last_used": last_used,
