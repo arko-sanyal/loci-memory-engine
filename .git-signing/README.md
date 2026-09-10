@@ -41,3 +41,8 @@ A successful verification prints `Good "file" signature for arko-sanyal@github .
   Arko's request, so the guarantee is only as strong as this environment's own security. This is
   a deliberate, disclosed tradeoff (see the commit history / `Sonnet-01.md` for the discussion),
   not an attempt to overstate what's actually guaranteed.
+
+## Registration status
+
+Key registered to GitHub 2026-09-10 (id 1168827). This commit is the first one made after
+registration, to confirm the Verified badge actually appears.
