@@ -34,6 +34,11 @@ A completed coordinated task must include:
 
 Do not expose or commit secrets, credentials, signing keys, tokens, or private environment files. Never add arbitrary shell execution, permission-granting, credential-retrieval, or tool-execution operations to the coordination interface.
 
+The bus implementation itself now lives in its own repository,
+[loci-coordination-bus](https://github.com/arko-sanyal/loci-coordination-bus) (`pip install
+loci-coordination-bus`), since it has no dependency on this project and is meant to be reused
+across projects. Install it as a dependency rather than re-adding `rag/coordination.py` here.
+
 ## Destructive and external actions
 
 Before formatting, deleting, overwriting, uploading, publishing, or changing access:

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rag"
 version = "0.1.0"
-description = "Local, offline RAG pipeline over documents using Ollama and Chroma"
+description = "Local, offline RAG pipeline with a heat-tiered LOCI memory engine (Ollama + sqlite-vec + FTS5)"
 requires-python = ">=3.11"
 dependencies = [
     "ollama>=0.4.0",
@@ -19,9 +19,6 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
-]
-coordination = [
-    "mcp>=1.0.0,<2.0.0",
 ]
 
 [tool.setuptools.packages.find]
