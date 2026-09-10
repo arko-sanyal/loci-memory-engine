@@ -22,3 +22,16 @@ in it is now wrong, or complete a task it lists as outstanding, write a **new**
 and why — the numbered sequence is the audit trail. Before trusting an existing `Sonnet-NN.md`,
 confirm it's still read-only (`ls -l`) and matches what `git log --follow` shows was committed;
 if either check fails, say so instead of treating its content as reliable.
+
+## Claude Code auto-memory (if you are Claude Code with this feature)
+
+3. Check `MEMORY.md` in your auto-memory directory (for this machine/project, that's
+   `/root/.claude/projects/-04-Project-Codex-RAG/memory/MEMORY.md`) — it is always loaded into
+   context automatically, including after a context compaction, so it should already be visible to
+   you without a separate read. Any entry marked `CURRENT:` names an in-progress task with its own
+   detailed memory file — **read that file in full** before doing new work in the area it covers;
+   the index line alone is not enough context to resume correctly. As of 2026-09-10 this includes
+   `project_dual_gpu_implementation_resume_point.md` (implementing
+   `docs/dual-gpu-coding-intelligence-blueprint.md`) — read it in full if you're about to touch
+   GPU/model-serving work, and update it (or, if the task is finished, replace its `CURRENT:`
+   framing) rather than leaving it stale once you've made progress.
