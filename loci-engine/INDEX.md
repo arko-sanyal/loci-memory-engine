@@ -10,7 +10,7 @@ Build plans: `docs/superpowers/plans/2026-09-10-loci-engine-memory-core.md` (thi
 | Module | Paper(s) | Status | Notes |
 |---|---|---|---|
 | `loci_engine/vectors.py` | 09 (SLP store concept) | Done | sqlite-vec (dense) + FTS5 (sparse) + RRF, single SQLite file. Replaces `rag/loci.py` (Chroma). |
-| `loci_engine/schema.sql` | 09 (Appendix B) | Planned (Task 2) | `isymprev` + `qsymprev` tables |
+| `loci_engine/schema.sql` | 09 (Appendix B) | Done | Applied via `db.open_db()`, idempotent (`CREATE TABLE IF NOT EXISTS`). |
 | `loci_engine/heat.py` | 09 (Appendix B), 05 | Planned (Task 3) | Decay 0.95x/day, hop increments, HOT/WARM/COLD tiers |
 | `loci_engine/store.py` | 09 | Planned (Task 4) | SQLite CRUD over `isymprev`/`qsymprev` |
 | `loci_engine/__init__.py` (`LociEngine` facade) | 09 | Planned (Task 5) | `remember`/`recall`/`add_fact`/`get_facts` |

@@ -24,3 +24,6 @@ dev = [
 [tool.setuptools.packages.find]
 where = [".", "loci-engine"]
 include = ["rag*", "loci_engine*"]
+
+[tool.setuptools.package-data]
+loci_engine = ["schema.sql"]
