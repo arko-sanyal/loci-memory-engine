@@ -6,7 +6,7 @@ from rag.chunker import chunk_documents
 from rag.embeddings import embed
 from rag.llm import generate
 from rag.loader import load_documents
-from rag.loci import LociEngine
+from loci_engine.vectors import VectorStore
 
 
 def _chunk_id(source: str, page: int, start_index: int) -> str:
@@ -30,7 +30,7 @@ def ingest(data_dir: str | None = None) -> int:
     metadatas = [chunk.metadata for chunk in chunks]
     embeddings = embed(texts)
 
-    engine = LociEngine(path=config.CHROMA_DB_PATH)
+    engine = VectorStore(path=config.CHROMA_DB_PATH)
     engine.add(ids=ids, embeddings=embeddings, texts=texts, metadatas=metadatas)
     return len(chunks)
 
@@ -39,9 +39,9 @@ def query(question: str, top_k: int | None = None) -> dict:
     category = classify_query_category(question)
     k = top_k if top_k is not None else recall_depth(category)
 
-    engine = LociEngine(path=config.CHROMA_DB_PATH)
+    engine = VectorStore(path=config.CHROMA_DB_PATH)
     [query_embedding] = embed([question])
-    results = engine.query(query_embedding, top_k=k)
+    results = engine.query(query_embedding, top_k=k, query_text=question)
     results = apply_ranking_strategy(category, results)
 
     context = "\n\n".join(f"[{i + 1}] {r['text']}" for i, r in enumerate(results))

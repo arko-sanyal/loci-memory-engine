@@ -6,8 +6,20 @@ Maintain a clean organized and well documented workspace for future development.
 Ensure the python virtual environment is activated at the start of each session and recreate it if necessary.
 
 Execute the full Pytest suite periodically and review code for errors before proceeding with commits.
-log status updates upon complemtion of key milestone or  successful deployment.
-Submit the status updates and logs to the RAG piepline according to the established documentation and submission procedures, for the first time research and create a  skill.
+Log status updates upon completion of a key milestone or a successful deployment.
+Submit the status updates and logs to the RAG pipeline according to the established documentation
+and submission procedures. The first time you do this in a session, research the existing
+convention (the `docs/STATUS-YYYY-MM-DD*.md` files already in this repo) and create your status
+log in that same format rather than inventing a new one — reuse it for every later update in the
+session instead of re-deriving the format each time.
+
+## LOCI Engine index maintenance
+
+`loci-engine/INDEX.md` is a living document tracking every module's paper source and build
+status. Any agent that adds, removes, renames, or changes the behavior of a file under
+`loci-engine/` MUST update the corresponding row in `loci-engine/INDEX.md` in the same commit.
+Do not defer this to a later cleanup pass — an out-of-date index is worse than no index, because
+it actively misleads the next agent about what exists.
 
 ## Secure LOCI coordination
 
