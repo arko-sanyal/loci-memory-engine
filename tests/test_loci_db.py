@@ -1,6 +1,14 @@
 from loci_engine.db import open_db
 
 
+def test_open_db_enables_wal_mode(tmp_path):
+    conn = open_db(str(tmp_path / "loci.db"))
+
+    mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+
+    assert mode.lower() == "wal"
+
+
 def test_open_db_creates_isymprev_and_qsymprev_tables(tmp_path):
     conn = open_db(str(tmp_path / "loci.db"))
 

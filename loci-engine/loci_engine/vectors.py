@@ -38,6 +38,9 @@ class VectorStore:
                 "file, e.g. ./loci.db"
             )
         self._conn = sqlite3.connect(path)
+        # See loci_engine/db.py's open_db() for why: readers shouldn't block on a
+        # concurrent writer once both model lanes touch the same store.
+        self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.enable_load_extension(True)
         import sqlite_vec
 

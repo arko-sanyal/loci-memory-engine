@@ -5,6 +5,14 @@ import pytest
 from loci_engine.vectors import VectorStore
 
 
+def test_init_enables_wal_mode(tmp_path):
+    store = VectorStore(str(tmp_path / "loci.db"))
+
+    mode = store._conn.execute("PRAGMA journal_mode").fetchone()[0]
+
+    assert mode.lower() == "wal"
+
+
 def test_add_then_query_returns_closest_dense_match_first(tmp_path):
     store = VectorStore(str(tmp_path / "loci.db"))
     store.add(
