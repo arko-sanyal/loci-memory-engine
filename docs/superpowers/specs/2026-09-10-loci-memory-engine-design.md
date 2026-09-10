@@ -1,82 +1,126 @@
 # LOCI Memory Engine — Design Spec
 
 Date: 2026-09-10
-Status: Approved in brainstorming; awaiting user review of this document
+Status: Approved in brainstorming; revised 2026-09-10 (root-level package, unified
+sqlite-vec+FTS5 store, forecasting/reflection un-deferred) at the user's explicit
+direction, superseding the original version's storage choice and Workstream-1 deferral.
 Source outline: "Memory & Context Layer Setup: Technical Task Outline" (Arko Sanyal, Sept 2026)
 Supersedes: `rag/loci.py` (thin Chroma wrapper) — the existing RAG pipeline spec (2026-09-09) remains valid for ingest/query behaviour.
 
 ## 1. Purpose and scope
 
 Turn the current document-only RAG store into the LOCI memory core described by
-the outline's Workstreams 2 and 3: a heat-tiered, goal-conditioned, versioned
+the outline's Workstreams 1, 2, and 3: a heat-tiered, goal-conditioned, versioned
 memory over document chunks, extracted entities/facts, the system's own
-thoughts, and goals, with Category-Adaptive Recall Depth as the read path and
-compact session hydration as the output. Everything stays local and offline
-(Ollama, SQLite, Chroma).
+thoughts, goals, forecasts, and reflections, with Category-Adaptive Recall Depth
+as the read path and compact session hydration as the output. Everything stays
+local and offline (Ollama, SQLite — `sqlite-vec` for dense ANN + `FTS5` for
+sparse lexical search, fused via RRF; no separate vector-store process).
 
-In scope (this spec, one implementation plan):
+In scope (this spec, phased across multiple implementation plans):
 
-- Unified memory store: chunks + entities + versioned exact facts + thoughts + goals.
+- Unified memory store, all eight paper-05 streams (p.4): `qsymprev` (exact
+  facts), `isymprev` (informational/entities), `dsymprev` (forecast
+  projection), `card` (CARD retrieval config, not a stored stream), `psymprev`
+  (predictive/forecasting), `ssymprev` (reflection-on-action), `msymprev`
+  (mood), `fsymprev` (focused retention/goals) — plus chunks and thoughts.
 - Heat/decay with three eras, goal-conditioned switched decay (GCSD), thought
   spectrum with reflection-gated crystallization.
 - Full CARD read path, TRS two-call contract (`preview_query` / `process_turn`),
   session hydration under a token budget, context-efficiency reporting.
 - Dual-state goal retainers with lifecycle, ledger, and focused-retention
   circuit breaker.
+- Forecasting (r+e, paper 01) and reflection-on-action (e+r, paper 02) as
+  working code with their paper-specified safety gates intact and verbatim:
+  the θ-gate (abstain below confidence 0.82), bounded mood with a 6-hour
+  half-life that decays toward neutral and can never become a persistent
+  foreground state, the behavioral-surprise update `e_{t+1} = 1 −
+  sim(A_t, o_{t+1})` with `sim ∈ [0,1]`, and the anti-hallucination invariant —
+  every update targets only externally-produced behavior `o_{t+1}`, never the
+  model's own prior output. These are hard constraints from the papers, not
+  configurable choices (paper 01 §7, paper 02 §6): the forecasting/reflection
+  loop must serve a defended wellbeing objective, and objective-agnosticism
+  pointed at engagement is the papers' own named failure mode.
 - Python API, CLI subcommands, MCP server.
 - Docs: papers index, schema reference, user guide.
 
 Deferred to later specs (explicitly not built here):
 
-- Workstream 1: sandboxed adaptation engine, e+r surprise loop, confidence
-  gates, rollback telemetry (papers 01, 02).
+- The papers' own pre-registered, held-out, non-circular experimental
+  validation protocol (LongMemEval-style corpus, hypotheses H1-H4/H0 stated in
+  advance, ≥5-seed confidence intervals) for papers 01/02 — the r+e/e+r
+  mechanisms themselves are in scope and gated per above; proving their
+  measured effect size against the papers' own benchmark methodology is a
+  separate, later validation effort. Rollback telemetry for the forecast/
+  reflect loops is deferred with it.
 - Paper 08 §5 interpersonal QoL gating; paper 06 ETHICS / BIGGER-PICTURE
   priority tiers and braiding.
 - AXON OpenAI-compatible proxy (paper 07); ledger / U-Key / ARC Council sync;
   physical VRAM/RAM/NVMe placement (hardware tiers are derived labels only);
-  LongMemEval benchmark harness; `loci_predictions` and `emotional_state` tables.
+  LongMemEval benchmark harness.
 
 ## 2. Papers index (what each paper contributes)
 
 | # | Paper (TD Commons) | Mechanism taken | Module |
 |---|---|---|---|
-| 01 | Forecasting Affective State (Art. 11089) | none now — deferred | — |
-| 02 | Reflection-on-Action e+r (Art. 11090) | none now — deferred | — |
+| 01 | Forecasting Affective State r+e (Art. 11089) | streams `psymprev`/`dsymprev` (forecast projection via ensemble simulation), mood law on `msymprev` (arousal ∝ error vs person's own 75th-percentile band, valence ∝ direction of miss, coherence ∝ deviation persistence/slope; bounded, 6h half-life decay to neutral), θ-gate abstain below confidence 0.82, crisis-vs-venting trajectory split (sustained/rising/high-coherence = crisis, spiky/declining/low-coherence = venting) | `forecast.py` |
+| 02 | Reflection-on-Action e+r (Art. 11090) | `ssymprev` behavioral-surprise update: `e_{t+1} = 1 − sim(A_t, o_{t+1})`, `M_{t+1} = M_t ⊕ Δ(prev→o_{t+1}, weight=f(e_{t+1}))`, anti-hallucination invariant (target is always externally-produced `o_{t+1}`, never the model's own prior output) | `reflect.py` |
 | 03 | Fast-Decaying Thought Spectrum (Art. 11091) | thought law `h₀·e^(−λΔt)·(1+refs)`, λ = ln2/4h, prune < 0.05, lexical ≥2-token confirmation, crystallize-only promotion | `thoughts.py` |
 | 04 | CARD (Art. 10856) | category → (K, strategy) table, 1-hop expansion, current-version filter, temporal ordering | `recall.py` |
-| 05 | Heat-Decaying Goal-Conditioned Architecture (Art. 11666) | append-only facts, goal fingerprints, circuit-breaker ledger with half-life classes, session startup/teardown invariants | `goals.py`, `heat.py` |
+| 05 | Heat-Decaying Goal-Conditioned Architecture (Art. 11666) | append-only facts, goal fingerprints, circuit-breaker ledger with half-life classes, session startup/teardown invariants, **the eight-stream taxonomy** (`qsymprev`, `isymprev`, `dsymprev`, `card`, `psymprev`, `ssymprev`, `msymprev`, `fsymprev` — p.4) that this spec's schema is organized around | `goals.py`, `heat.py`, `schema.sql` |
 | 06 | Focused Retention (Art. 11092) | switched decay `λ_hold` / `λ_free`, five-exit goal taxonomy, suspend ≠ close, consolidation on fulfilled/relinquished | `heat.py`, `goals.py` |
 | 07 | LOCI ∞ Middleware (Art. 10806) | isymprev/qsymprev split, access +1.0 / hop +0.5 / +0.25, tier thresholds 1.5 / 0.5, Mode A / Mode B retrieval, "YOU" injection template | `heat.py`, `recall.py`, `extract.py` |
 | 08 | Persistent Memory Engine (Art. 10843) | `supersedes` / `valid_from` / `valid_until` chain, `source_trust` 1.0 / 0.7 / 0.5, asymmetric conflict gate 0.8 / 1.2, temporal queries | `store.py`, `extract.py` |
 | 09 | Thermal Reasoning Substrate (preprint) | Appendix-B SQL schema as base, two-call interface, two-hop spreading activation, heat range [0, 3] | `schema.sql`, `__init__.py` |
 
-`docs/loci/INDEX.md` expands this table with every parameter name and default.
+`loci-engine/INDEX.md` expands this table with every parameter name and default,
+and is a living document — every task touching `loci-engine/` updates it in the
+same commit (see `agent_instructions.md`).
 
 ## 3. Repository organization
 
 ```
-rag/loci/
-  __init__.py     LociEngine facade (public API, §8)
-  schema.sql      SQLite schema (§4), applied on first open, PRAGMA user_version
-  store.py        SQLite access: records, facts, links, goals, ledger, sessions
-  vectors.py      Chroma collection keyed by memory id (today's loci.py)
-  heat.py         heat laws, eras, GCSD switch, propagation, materialize sweep
-  extract.py      Extractor protocol; LLMExtractor (Ollama JSON), RuleExtractor
-  thoughts.py     thought capture, dedup, reflect → crystallize → prune
-  goals.py        goal retainers, fingerprints, lifecycle, circuit breaker
-  recall.py       CARD categorize/strategies, Mode B lookup, budget filling,
-                  hydration payload (absorbs rag/card.py)
-rag/mcp_server.py MCP stdio server, thin adapter over the facade
-rag/cli.py        existing ingest/query + new subcommands (§8)
-rag/config.py     + RAG_LOCI_DB_PATH and the knobs in §10
-docs/loci/
-  INDEX.md        papers → mechanism → module → parameters
-  SCHEMA.md       table/field reference and invariants
-  USER-GUIDE.md   setup, CLI, MCP client config, tuning
+loci-engine/                (repo root, not nested under rag/ — matches the
+                              author's private repo name arkosanyal/loci-engine)
+  INDEX.md          papers → mechanism → module → parameters (living document)
+  SCHEMA.md         table/field reference and invariants
+  USER-GUIDE.md     setup, CLI, MCP client config, tuning
+  loci_engine/      the importable package (hyphens are illegal in Python
+                    identifiers, hence loci-engine/loci_engine/, same pattern
+                    as any PyPI package named foo-bar)
+    __init__.py     LociEngine facade (public API, §8)
+    schema.sql      SQLite schema (§4): all eight paper-05 streams, applied on
+                    first open, PRAGMA user_version
+    db.py           open_db(path): applies schema.sql idempotently
+    store.py        SQLite access: records, facts, links, goals, ledger, sessions
+    vectors.py      sqlite-vec (dense ANN, int8/float32 embeddings) + FTS5
+                    (sparse BM25) over the fact spectrum, fused via Reciprocal
+                    Rank Fusion (RRF) — single SQLite file, no separate
+                    vector-store process (replaces today's Chroma-backed
+                    rag/loci.py and the design's earlier Chroma choice)
+    heat.py         heat laws, eras, GCSD switch, propagation, materialize sweep
+    extract.py      Extractor protocol; LLMExtractor (Ollama JSON), RuleExtractor
+    thoughts.py     thought capture, dedup, reflect → crystallize → prune
+    goals.py        goal retainers, fingerprints, lifecycle, circuit breaker
+    forecast.py     paper 01 r+e: psymprev/dsymprev forecast projection,
+                    msymprev mood law, θ-gate (0.82), crisis/venting split
+    reflect.py      paper 02 e+r: ssymprev behavioral-surprise update,
+                    anti-hallucination invariant
+    recall.py       CARD categorize/strategies, Mode B lookup, budget filling,
+                    hydration payload (absorbs rag/card.py)
+rag/mcp_server.py   MCP stdio server, thin adapter over the facade
+rag/cli.py          existing ingest/query + new subcommands (§8)
+rag/config.py       + RAG_LOCI_DB_PATH and the knobs in §10
 ```
 
-`rag/card.py` is folded into `recall.py`; `rag/loci.py` is replaced by the
-package. `ingest()` and `query()` keep their signatures and return shapes.
+`rag/card.py` is folded into `loci_engine/recall.py`; `rag/loci.py` is deleted
+(there is no `vectors.py`-as-Chroma-shim step — the sqlite-vec+FTS5 store
+lands directly). `ingest()` and `query()` keep their signatures and return
+shapes. `pyproject.toml`'s `[tool.setuptools.packages.find]` gains
+`loci_engine*` alongside `rag*`, and its `chromadb>=1.5.9` dependency is
+removed and replaced with `sqlite-vec>=0.1.9` (FTS5 ships in stdlib
+`sqlite3` when the interpreter's SQLite was built with
+`SQLITE_ENABLE_FTS5`, confirmed present in this environment).
 
 ## 4. Index schema (SQLite is the system of record)
 
@@ -161,11 +205,54 @@ Events: `opened, step, tripped, suspended, resumed, resolved:<mode>, bound`.
 `sessions(id, started_at, ended_at NULL, turn_count, hydration_tokens NULL)`;
 `turns(id, session_id, role, text, content_hash, at)`.
 
-### Chroma collection `loci_vectors`
+### `psymprev` — predictive/forecasting (paper 01)
 
-`id = memory.id`, embedding (nomic-embed-text), metadata `{kind, era}`. Only
-fact-spectrum records are embedded. Hardware tier is derived at read time:
-`hot` if heat > 1.5, `warm` if > 0.5, else `cold` — never stored.
+`entity TEXT, ts REAL, predicted_state TEXT (JSON), confidence REAL, realized_state TEXT NULL, PRIMARY KEY (entity, ts)`.
+Written by `forecast.py`'s ensemble projection; `realized_state` backfilled
+when the forecast window closes, feeding paper 02's surprise term.
+
+### `ssymprev` — reflection-on-action (paper 02)
+
+`id INTEGER PK, session_id TEXT, t INTEGER, anticipation_set TEXT (JSON), observed TEXT, surprise REAL, weight REAL, applied_at REAL`.
+One row per turn's `e_{t+1} = 1 − sim(A_t, o_{t+1})` computation and the
+resulting label-free update; append-only, the audit trail for the
+anti-hallucination invariant (`observed` is always externally-produced).
+
+### `msymprev` — mood (paper 01)
+
+`session_id TEXT PK, arousal REAL, valence REAL, coherence REAL, updated_at REAL`.
+Bounded `[-1, 1]` per axis, 6-hour half-life decay toward `(0, 0, 0)` applied
+lazily at read time exactly like fact-spectrum heat; never a persistent
+foreground state (paper 01 §7 constraint, enforced by the decay, not by policy).
+
+### `dsymprev` — forecast projection (paper 01)
+
+`entity TEXT, horizon_ts REAL, projected_value TEXT, ensemble_variance REAL, PRIMARY KEY (entity, horizon_ts)`.
+The forward-projected estimate `forecast.py` produces from the current
+`isymprev`/`qsymprev` state via ensemble simulation, gated behind the θ=0.82
+confidence threshold before it is fed back into `recall`.
+
+### `fsymprev` — focused retention (paper 06, backs `goals`)
+
+Not a separate table: `goals` (below) and its `goal_ledger` are paper 05/06's
+`fsymprev` stream. Listed here only so the eight-stream table in §2 has a
+named home for each stream; see the `goals` section for the real schema.
+
+### sqlite-vec + FTS5 index (dense + sparse, fused)
+
+`vectors.py` maintains two structures over the fact spectrum in the same
+SQLite file as `memory`:
+
+- a `vec0` virtual table (via the `sqlite-vec` extension) keyed by
+  `memory.id`, storing the `nomic-embed-text` embedding for dense ANN;
+- an `fts5` virtual table keyed by `memory.id`, indexing `memory.text` for
+  sparse BM25 lookup.
+
+Only fact-spectrum records are indexed. A query embeds once, runs both a
+`vec0` KNN and an `fts5` MATCH, and fuses the two ranked lists via Reciprocal
+Rank Fusion (RRF): `score(id) = Σ 1 / (60 + rank_i(id))` over whichever lists
+contain `id`. Hardware tier is derived at read time: `hot` if heat > 1.5,
+`warm` if > 0.5, else `cold` — never stored.
 
 ## 5. Heat, decay, eras, GCSD
 
@@ -200,8 +287,10 @@ prune, and closes expired ledger entries.
 
 ## 6. Write path
 
-SQLite commits first, then Chroma upsert; `reindex()` rebuilds Chroma from
-SQLite.
+Single SQLite connection: the `memory` row commits, then the `vec0`/`fts5`
+upserts happen in the same transaction (one store, no cross-store consistency
+window like the old Chroma-after-commit design had); `reindex()` rebuilds the
+`vec0`/`fts5` index from `memory` if it ever drifts.
 
 1. Documents — `ingest()` → chunks as `memory(kind=chunk, era=mid,
    origin=document, source_trust=0.9)`, idempotent by id. Chunks are not
@@ -240,10 +329,10 @@ SQLite.
 2. Mode B: if the normalized query contains both a known entity name and one
    of that entity's fact keys, return the current fact for that `(entity, key)`
    at rank 0 with `exact=True` (or the version valid at `at=T`).
-3. Candidates: Chroma ANN top `4K` by cosine over the fact spectrum ∪ top `K`
-   by heat among records whose `entity` appears in the query. Thoughts are
-   never retrievable.
-4. Score: `cosine × (1 + heat(t) / 3)`; weight configurable (design choice —
+3. Candidates: `vec0` dense ANN top `4K` ∪ `fts5` sparse BM25 top `4K`, fused
+   via RRF, over the fact spectrum ∪ top `K` by heat among records whose
+   `entity` appears in the query. Thoughts are never retrievable.
+4. Score: `rrf_score × (1 + heat(t) / 3)`; weight configurable (design choice —
    CARD ranks by heat alone).
 5. Strategy per category (CARD): `information_extraction` K=5;
    `knowledge_update` K=3, facts filtered to `valid_until IS NULL`, recency
@@ -272,11 +361,12 @@ records ÷ payload tokens.
 
 ## 8. Interfaces
 
-Python (`rag.loci.LociEngine`):
+Python (`loci_engine.LociEngine`):
 
 ```
-LociEngine(db_path=config.LOCI_DB_PATH, chroma_path=config.CHROMA_DB_PATH,
-           extractor=None)          # None → LLMExtractor with RuleExtractor fallback
+LociEngine(db_path=config.RAG_LOCI_DB_PATH, extractor=None)
+           # single SQLite file (memory + vec0 + fts5); None → LLMExtractor
+           # with RuleExtractor fallback
 remember(text, origin, source=None) -> str
 recall(query, k=None, category=None, at=None, touch=True) -> list[Record]
 preview_query(text, budget_tokens=560) -> str
@@ -290,6 +380,13 @@ goals.open(text, layer="foreground", half_life_class="session",
 goals.resolve(goal_id, mode, note=None) -> Goal
 goals.suspend(goal_id) / goals.resume(goal_id) / goals.list(state=None)
 goals.check_step(goal_id, context_ids, last_action) -> StepVerdict
+forecast.project(entity, horizon_ts) -> Forecast | None
+           # None when confidence < θ=0.82 (abstain, per paper 01 §7)
+reflect.update(session_id, t, anticipation_set, observed) -> ReflectionResult
+           # target is always the externally-produced `observed`; never the
+           # model's own prior output (paper 02's anti-hallucination invariant)
+mood.current(session_id) -> MoodState
+           # (arousal, valence, coherence), each decayed toward 0 at read time
 maintain() -> MaintenanceReport
 status() -> StatusReport
 reindex() -> int
@@ -341,6 +438,9 @@ The server contains no logic beyond argument mapping.
 | `RAG_LOCI_BUDGET_TOKENS` | 560 |
 | `RAG_LOCI_CB_REPEAT_THRESHOLD` | 2 |
 | `RAG_LOCI_RECALL_DEPTH_*` | 5 / 3 / 10 / 7 (CARD table) |
+| `RAG_LOCI_FORECAST_THETA` | 0.82 (paper 01 §3.3 θ-gate, not configurable in spirit — exposed only for testing) |
+| `RAG_LOCI_MOOD_HALF_LIFE_HOURS` | 6 (paper 01 §3.2) |
+| `RAG_LOCI_RRF_K` | 60 (Reciprocal Rank Fusion constant) |
 
 ## 11. Error handling
 
@@ -350,8 +450,10 @@ The server contains no logic beyond argument mapping.
 - Schema: `PRAGMA user_version` checked on open; a newer version than the code
   knows refuses to open. Forward migrations are numbered SQL scripts applied in
   order.
-- Store consistency: SQLite transaction commits before the Chroma upsert; a
-  Chroma failure after commit is logged and repaired by `reindex()`.
+- Store consistency: the `memory` row and its `vec0`/`fts5` upserts share one
+  SQLite transaction; a partial write is rolled back, not repaired after the
+  fact — the old Chroma-as-a-second-store failure mode does not exist here.
+  `reindex()` remains available for drift (e.g. after a schema migration).
 - Data errors (missing data dir, empty query) fail fast with a message, as today.
 
 ## 12. Testing
@@ -373,6 +475,17 @@ TDD per module; the whole suite runs without Ollama.
 - Ollama-dependent: `LLMExtractor`, end-to-end `query`, session gist — skipped
   when unreachable (existing pattern, with the connect timeout).
 - CER and MRR targets from the outline are reported by `status()`, not asserted.
+- Forecast/reflect: θ-gate abstains below 0.82 and returns `None` (never a
+  low-confidence guess); mood axes stay within `[-1, 1]` and decay toward 0
+  with a 6h half-life under repeated advancement of a fixed clock; the
+  anti-hallucination invariant holds under a synthetic test that feeds the
+  loop its own emitted anticipation as if it were the observed behavior and
+  asserts the update is rejected/ignored, not learned from; crisis vs venting
+  trajectory classification on the two synthetic trajectories paper 01 §6
+  describes (identical arousal/valence, differing coherence).
+- sqlite-vec/FTS5: RRF fusion ranks a lexical-only match and a semantic-only
+  match both above a candidate matching neither; index survives a `reindex()`
+  round-trip with identical top-K for a fixed query.
 
 ## 13. Documentation deliverables
 
