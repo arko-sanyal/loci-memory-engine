@@ -6,7 +6,7 @@ from rag import config
 
 def embed(texts: list[str]) -> list[list[float]]:
     client = ollama.Client(
-        host=config.OLLAMA_HOST, timeout=config.OLLAMA_CONNECT_TIMEOUT_SECONDS
+        host=config.EMBEDDING_HOST, timeout=config.OLLAMA_CONNECT_TIMEOUT_SECONDS
     )
     try:
         return [
@@ -15,7 +15,7 @@ def embed(texts: list[str]) -> list[list[float]]:
         ]
     except (httpx.ConnectError, httpx.ConnectTimeout, ConnectionError) as e:
         raise ConnectionError(
-            f"Could not reach Ollama at {config.OLLAMA_HOST}. "
+            f"Could not reach Ollama at {config.EMBEDDING_HOST}. "
             "Start it with `ollama serve` and make sure "
             f"`{config.EMBEDDING_MODEL}` is pulled."
         ) from e

@@ -1,19 +1,44 @@
 import httpx
-import ollama
 
 from rag import config
 
+_ROLE_ATTRS = {
+    "compact": ("COMPACT_HOST", "COMPACT_MODEL"),
+    "expand": ("EXPAND_HOST", "EXPAND_MODEL"),
+}
 
-def generate(prompt: str) -> str:
-    client = ollama.Client(
-        host=config.OLLAMA_HOST, timeout=config.OLLAMA_CONNECT_TIMEOUT_SECONDS
-    )
-    try:
-        response = client.generate(model=config.LLM_MODEL, prompt=prompt)
-        return response["response"]
-    except (httpx.ConnectError, httpx.ConnectTimeout, ConnectionError) as e:
+
+def _resolve_role(role: str) -> tuple[str, str]:
+    if role not in _ROLE_ATTRS:
+        raise ValueError(f"Unknown model role {role!r}; expected one of {sorted(_ROLE_ATTRS)}")
+    host_attr, model_attr = _ROLE_ATTRS[role]
+    host = getattr(config, host_attr)
+    model = getattr(config, model_attr)
+    if not host or not model:
         raise ConnectionError(
-            f"Could not reach Ollama at {config.OLLAMA_HOST}. "
-            "Start it with `ollama serve` and make sure "
-            f"`{config.LLM_MODEL}` is pulled."
+            f"The {role} lane is not configured (RAG_{host_attr}/RAG_{model_attr} are unset)."
+        )
+    return host, model
+
+
+def generate(prompt: str, role: str = "compact") -> str:
+    host, model = _resolve_role(role)
+    try:
+        response = httpx.post(
+            f"{host}/v1/chat/completions",
+            json={"model": model, "messages": [{"role": "user", "content": prompt}]},
+            timeout=config.OLLAMA_CONNECT_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]
+    except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+        if role == "compact":
+            raise ConnectionError(
+                f"Could not reach Ollama at {host}. "
+                "Start it with `ollama serve` and make sure "
+                f"`{model}` is pulled."
+            ) from e
+        raise ConnectionError(
+            f"Could not reach the expand-lane server at {host}. "
+            f"Start llama-server with `{model}` loaded."
         ) from e

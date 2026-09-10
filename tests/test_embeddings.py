@@ -35,7 +35,7 @@ def test_embed_produces_distinct_vectors_for_distinct_texts():
 
 
 def test_embed_raises_clear_error_when_ollama_unreachable(monkeypatch):
-    monkeypatch.setattr(config, "OLLAMA_HOST", "http://127.0.0.1:1")
+    monkeypatch.setattr(config, "EMBEDDING_HOST", "http://127.0.0.1:1")
     monkeypatch.setattr(config, "OLLAMA_CONNECT_TIMEOUT_SECONDS", 1.0)
 
     with pytest.raises(ConnectionError, match="ollama serve"):

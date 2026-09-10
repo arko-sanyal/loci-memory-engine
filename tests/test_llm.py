@@ -26,9 +26,39 @@ def test_generate_returns_nonempty_answer():
     assert len(answer.strip()) > 0
 
 
-def test_generate_raises_clear_error_when_ollama_unreachable(monkeypatch):
-    monkeypatch.setattr(config, "OLLAMA_HOST", "http://127.0.0.1:1")
+def test_generate_defaults_to_compact_role_and_uses_compact_host(monkeypatch):
+    monkeypatch.setattr(config, "COMPACT_HOST", "http://127.0.0.1:1")
     monkeypatch.setattr(config, "OLLAMA_CONNECT_TIMEOUT_SECONDS", 1.0)
 
     with pytest.raises(ConnectionError, match="ollama serve"):
         generate("test")
+
+
+def test_generate_raises_clear_error_when_ollama_unreachable(monkeypatch):
+    monkeypatch.setattr(config, "COMPACT_HOST", "http://127.0.0.1:1")
+    monkeypatch.setattr(config, "OLLAMA_CONNECT_TIMEOUT_SECONDS", 1.0)
+
+    with pytest.raises(ConnectionError, match="ollama serve"):
+        generate("test")
+
+
+def test_generate_rejects_unknown_role():
+    with pytest.raises(ValueError, match="compact"):
+        generate("test", role="bogus")
+
+
+def test_generate_raises_clear_error_when_expand_lane_not_configured(monkeypatch):
+    monkeypatch.setattr(config, "EXPAND_HOST", None)
+    monkeypatch.setattr(config, "EXPAND_MODEL", None)
+
+    with pytest.raises(ConnectionError, match="expand"):
+        generate("test", role="expand")
+
+
+def test_generate_uses_expand_host_and_model_when_configured(monkeypatch):
+    monkeypatch.setattr(config, "EXPAND_HOST", "http://127.0.0.1:1")
+    monkeypatch.setattr(config, "EXPAND_MODEL", "qwen3-coder-30b")
+    monkeypatch.setattr(config, "OLLAMA_CONNECT_TIMEOUT_SECONDS", 1.0)
+
+    with pytest.raises(ConnectionError, match="llama-server"):
+        generate("test", role="expand")
