@@ -238,6 +238,197 @@ Not a separate table: `goals` (below) and its `goal_ledger` are paper 05/06's
 `fsymprev` stream. Listed here only so the eight-stream table in §2 has a
 named home for each stream; see the `goals` section for the real schema.
 
+### `usymprev` — user-agent relationship/profile (new work, not paper-derived)
+
+Added 2026-09-10 (amendment). Not one of the 9 papers' 8 named streams — a
+9th concept, proposed here for the first time to hold what none of the
+existing streams cover: the ongoing relationship between the user and the
+agent, and the durable "bigger picture" the user's individual tasks sit
+inside. Distinct from `qsymprev` (exact facts), `psymprev`/`dsymprev`
+(moment-to-moment forecasting), and `fsymprev`/`goals` (per-task goal
+lifecycle) — this is slower-moving, relationship-defining context that gives
+other tasks their meaning, not a task or a fact itself.
+
+| column | type | notes |
+|---|---|---|
+| `entity` | TEXT | always the user's canonical identity, not an arbitrary entity |
+| `key` | TEXT | e.g. `working_style`, `long_term_goal`, `rapport_note` |
+| `value` | TEXT | |
+| `ts` | REAL | |
+| `heat` | REAL | same clamp/decay mechanics as `memory`, but bound to the `critical`
+half-life class (paper 05 §2.1's longest tier, 720h) by default — relationship
+facts should not casually decay the way session-scoped facts do |
+| `source_trust` | REAL | same three/four-tier model as `facts` — **subject to the
+provenance boundary below**, since this is exactly the kind of high-stakes,
+long-lived record an impersonation attack would target |
+
+No versioning chain (no `supersedes`/`valid_from`/`valid_until`) in this first
+pass — unlike `qsymprev`, relationship facts are expected to accumulate and
+occasionally get corrected in place via the same asymmetric gate as `facts`,
+not to need a full "what did we believe as of time T" history. Revisit if a
+real need for relationship-fact history emerges.
+
+Included in `hydrate()`'s fill order between far-era pinned records and open
+goals (§7), so the "bigger picture" is present before task-level context.
+
+### Symbol + expansion — the "symprev" pattern, governed by heat
+
+Added 2026-09-10 (amendment). Every `*symprev` stream name shares this
+pattern by design: a **symbol** — a tiny (~20 byte, one short phrase)
+preview cheap enough to hold many of at once — plus an **expansion**, the
+full content, fetched only when heat says it's warranted. The working
+analogy is this project's own Claude-memory index: `MEMORY.md` holds one-line
+symbols for every memory file; a handful of those lines, skimmed together,
+are enough to reconstruct "what's going on," and a file is only read in full
+once its symbol signals it's actually relevant to the task at hand. Several
+cheap symbols building situational awareness, with full detail one hop away
+when needed, is the same shape as CARD's own token-budget hydration — this
+makes it the same mechanism, not a parallel one.
+
+**Heat governs the symbol/expansion decision directly, with no separate
+lookup step:** when `hydrate()`/`recall()` assembles a payload, a record's
+heat tier decides its fidelity —
+
+- **HOT**: include the full `expanded` content.
+- **MILD**: symbol (`gist`) only.
+- **COLD**: omitted entirely below CARD's cutoff, or symbol-only if included
+  at all (e.g. a low-heat 1-hop neighbour surfaced for completeness).
+
+(Exact thresholds: see the "Heat scale amendment" section below, which is
+authoritative — the 0–3-scale numbers this section originally cited are
+superseded.)
+
+`isymprev` already has both columns (`gist`, `expanded`) from Plan 1 — this
+amendment is what governs *when* each is used, which Plan 1 left unspecified.
+The pattern is applied per-stream based on whether a genuine two-tier split
+adds value, not mechanically to every table:
+
+- `isymprev`, `usymprev`: genuine two-tier — narrative/relationship content
+  can be long; gains a compact symbol distinct from the full text.
+- `dsymprev`, `psymprev`, `ssymprev`: gains an `expanded` column alongside
+  their existing structured fields (a forecast/reflection's "explanation," if
+  one is generated, expands; the structured prediction/surprise values
+  themselves are already small enough to be the symbol).
+- `qsymprev`: **no split needed.** An exact fact's `value` (e.g. `"8766"`,
+  `"UTC-5"`) is already at or below symbol size by construction — adding an
+  artificial `expanded` column to something already compact would add a
+  column that's always empty. `qsymprev`'s `value` IS its own symbol.
+- `msymprev`: no split — three bounded floats (arousal/valence/coherence)
+  have no "expanded" form to hold.
+
+**Note on absolute values (clarified 2026-09-10):** nothing in the regular
+heat-tiered memory ever reaches an absolute/permanent maximum — heat is
+always provisional and subject to decay, by design. The one exception is the
+non-decaying ethical governance tier already named in paper 06's priority
+hierarchy (§1's "Deferred to later specs" list — paper 06 ETHICS/BIGGER-
+PICTURE priority tiers). That tier sits categorically outside the HOT/MILD/
+COLD heat system entirely — it is not a fourth heat level, does not decay,
+and is not affected by this amendment. It remains deferred; noted here only
+so "MILD/COLD memory is never absolute" and "ethics is the one governance
+layer that is" are captured consistently rather than left implicit.
+
+### Heat scale amendment — 0–1 asymptotic, supersedes every 0–3 reference above
+
+Added 2026-09-10 (final amendment from this session's design conversation).
+**This section is authoritative and supersedes every `[0, 3]`, `HEAT_MAX=3.0`,
+`1.5`/`0.5` threshold, and flat `+1.0`/`+0.5`/`+0.25`/`+0.125` increment
+referenced elsewhere in this document** (§4's `memory.heat` clamp, §5's heat
+law, §10's `RAG_LOCI_HEAT_MAX`/`_TIER_HOT`/`_TIER_MILD` defaults, and paper
+07's row in the §2 index) — those describe the law as originally published in
+paper 09 Appendix B and paper 07; this amendment deliberately diverges from
+that published text, the same way MILD already diverges from the papers'
+published WARM. Do not build to the older values.
+
+**Scale:** heat lives in the open interval `(0, 1)` — never exactly 0, never
+exactly 1. Exactly `1.0` is reserved for the non-decaying ethics/governance
+tier (deferred, depends on Forge; see the note above), which is categorically
+outside this law, not a value this law ever produces.
+
+**Base heat:** `0.333` on creation (same relative position as the old law's
+`1.0` base out of a `3.0` max).
+
+**Reinforcement (replaces flat increments):** each access closes a fraction
+of the remaining distance to 1, guaranteeing the result stays under 1 no
+matter how many times a record is touched:
+
+```
+heat_new = heat + (1 − heat) × k
+k = 0.5    for a direct hit
+k = 0.25   for a 1-hop neighbor
+k = 0.125  for a 2-hop neighbor
+k = 0.0625 for a 3-hop neighbor
+```
+
+**Decay:** unchanged in form — `heat_new = heat × 0.95` per day — already
+multiplicative/relative, so it needs no rescaling and mathematically can
+never reach exactly 0 from a positive start.
+
+**Tiers (HOT/MILD/COLD, proportional to the old 50%/16.7% split of max):**
+
+```
+HOT:  heat > 0.5
+MILD: heat > 0.167
+COLD: heat ≤ 0.167
+```
+
+**Config table (§10) replacement values:** `RAG_LOCI_HEAT_MAX = 1.0` (or
+remove the constant entirely, since the open interval has no fixed ceiling to
+clamp against — implementers should treat "clamp" as "asymptotic approach,"
+not a hard `min()`); `RAG_LOCI_TIER_HOT = 0.5`; `RAG_LOCI_TIER_MILD = 0.167`.
+
+### Provenance boundary — closing the cross-agent impersonation gap
+
+Added 2026-09-10 (amendment, prompted by a real incident: a fact was
+poisoned when one agent's message, crafted to read as if the user said it,
+was passed to another agent and stored as `origin=user_explicit_statement`).
+
+**The gap:** `process_turn(session_id, role, text, reasoning=None)`'s `role`
+parameter is a plain string. Nothing before this amendment stopped a caller
+from passing `role="user"` for text that did not actually come from the live
+user — including text relayed from another agent (over
+`loci-coordination-bus` or any other channel), a tool result, or a retrieved
+document, regardless of what that text itself claims about its own origin.
+Since `origin=user_explicit_statement` carries `source_trust=1.0` and the
+asymmetric gate's *easier* correction path (§3.1 of paper 08: challenger
+trust ≥ incumbent → gate multiplier 0.8), this is the highest-value target
+for exactly the kind of poisoning that already happened once.
+
+**The fix — a type boundary, not a stronger string check.** A free-text
+`role` parameter can always be typed incorrectly, honestly or not; no amount
+of validation on the string itself closes the gap, because the problem is
+never the string's *content*, it's *what code path was allowed to produce
+it*. Concretely:
+
+- `process_turn` stops accepting `role: str`. It accepts `role: Role`, where
+  `Role` is a closed type with exactly one live-user-carrying variant,
+  `UserTurn`, constructible only inside the process's designated live-input
+  boundary module (the actual chat/CLI/UI code that reads a real turn from
+  the human) — never exported for general use, never constructible from a
+  string literal.
+- Every other origin — `AssistantTurn`, `ToolTurn`, `RetrievedTurn`,
+  `AgentMessageTurn` (the coordination bus's `agent.message` payloads
+  explicitly land here, regardless of their content) — is constructible
+  anywhere, and none of them can ever produce `origin=user_explicit_statement`
+  or `source_trust=1.0`, full stop, no override path.
+- This applies to `usymprev` writes identically to `qsymprev` writes — the
+  boundary is per-trust-tier, not per-table.
+- Fail-closed default: any code that cannot or does not construct a `UserTurn`
+  gets `AgentMessageTurn`'s trust tier (`source_trust=0.5`, matching paper
+  08's `system_derived`), never something in between and never something
+  higher by omission.
+
+This is the same principle `loci-coordination-bus`'s HMAC signing already
+uses one layer down — authority comes from *how a value was produced*, never
+from what the value asserts about itself — implemented here as a type
+boundary rather than a signature, since this is one local process rather than
+two parties over a network. It does not defend against a compromised or
+malicious *live input device* (keystroke/audio-level spoofing) — that is a
+different, out-of-scope threat model (see the design conversation this
+amendment was extracted from, 2026-09-10) disproportionate to what a memory
+library can or should defend against; it fully closes the realistic threat
+that already occurred: one agent's output being mistaken for the user's own
+words by another agent's memory.
+
 ### sqlite-vec + FTS5 index (dense + sparse, fused)
 
 `vectors.py` maintains two structures over the fact spectrum in the same
@@ -432,7 +623,7 @@ The server contains no logic beyond argument mapping.
 | `RAG_LOCI_HOLD_HALF_LIFE_HOURS` / `_FREE_HALF_LIFE_HOURS` | 336 / 2 |
 | `RAG_LOCI_THOUGHT_HALF_LIFE_HOURS` / `_THOUGHT_PRUNE` | 4 / 0.05 |
 | `RAG_LOCI_HEAT_MAX` | 3.0 |
-| `RAG_LOCI_TIER_HOT` / `_TIER_WARM` | 1.5 / 0.5 |
+| `RAG_LOCI_TIER_HOT` / `_TIER_MILD` | 1.5 / 0.5 |
 | `RAG_LOCI_HEAT_WEIGHT` | 1/3 (score blend) |
 | `RAG_LOCI_GATE_LOWER` / `_GATE_HIGHER` | 0.8 / 1.2 |
 | `RAG_LOCI_BUDGET_TOKENS` | 560 |
