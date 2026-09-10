@@ -6,12 +6,15 @@ Implements the portable core of the CARD scheme described in
 are conditioned on a query category, assigned by a rule-based keyword
 heuristic (one of the three classification options the paper allows).
 
-The loci engine has no heat scores, entity co-occurrence graph, or fact
-versioning, so this implements only what those primitives support:
-category-adaptive K, a recency tie-break for knowledge-update queries,
-and timestamp-aware ordering for temporal-reasoning queries. The paper's
-multi-session-reasoning graph-hop expansion is not implemented (no
-entity graph exists) - that category only gets the deeper K.
+This module ranks document chunks from the sqlite-vec/FTS5 store (`loci_engine.vectors`)
+by raw metadata dates, not by real heat - it does not yet consume `loci_engine`'s
+isymprev/qsymprev heat/fact store (that store exists and is tested; wiring CARD's
+ranking to it is tracked as Plan 2 in `loci-engine/INDEX.md`, not done here). There is
+also no entity co-occurrence graph or fact versioning yet, so this implements only what
+raw dates support: category-adaptive K, a recency tie-break for knowledge-update
+queries, and timestamp-aware ordering for temporal-reasoning queries. The paper's
+multi-session-reasoning graph-hop expansion is not implemented (no entity graph exists)
+- that category only gets the deeper K.
 """
 
 RECALL_DEPTH = {
