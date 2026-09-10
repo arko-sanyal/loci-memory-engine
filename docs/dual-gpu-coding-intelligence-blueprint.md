@@ -19,15 +19,43 @@ assistant than one big split model would have been anyway — see §2.
 | | RTX 5060 Ti | Arc Pro B70 |
 |---|---|---|
 | VRAM | 16 GB (measured: 15.9 GiB total / 14.8 GiB available via `nvidia-smi` in this WSL2) | 32 GB GDDR6, 608 GB/s |
-| Visible from WSL2 today? | **Yes** — CUDA, working, this is what `rag/llm.py` already talks to | **No** — no `/dev/dri`, no matching Vulkan ICD; WSL2 genuinely cannot see it |
-| Best proven backend | Ollama / CUDA (already installed) | llama.cpp with the SYCL backend, run **natively on Windows** (not WSL2) |
-| Best measured throughput | (not yet benchmarked for a coding model — do this in Phase 1) | Qwen 3.6-35B-A3B MoE, Q4_K_M: **54.7 tok/s** decode, 615 tok/s prefill, single card |
+| Visible from WSL2 today? | **Yes** — CUDA, working, this is what `rag/llm.py` already talks to | **Likely yes, via a different path than tested** — see correction below |
+| Best proven backend | Ollama / CUDA (already installed) | llama.cpp with the SYCL backend — **probably runnable from inside this same WSL2**, not Windows-native |
+| Best measured throughput | (not yet benchmarked for a coding model — do this in Phase 1) | Qwen 3.6-35B-A3B MoE, Q4_K_M: **54.7 tok/s** decode, 615 tok/s prefill, single card (measured on native Linux; WSL2 delta unknown, see below) |
 
-**Action item before anything else:** confirm in Windows (Device Manager, or Intel's `xpu-smi` /
-Arc Control) that the B70 is actually installed and recognized by the OS. WSL2's blindness to it
-is expected either way (no `/dev/dri` device is passed through) and is not evidence the card is
-missing — but it's also not evidence it's present. Verify this first; everything in Phase 2
-assumes it's there.
+> **Correction (superseding the original §1/§3 conclusion):** the original finding "WSL2 can't see
+> the B70" was tested through Ollama's device discovery, which has no SYCL backend at all — it
+> only probes CUDA and Vulkan, so it could never have found the Arc regardless of what was
+> installed. That test didn't prove what it was taken to prove. A follow-up research pass sourced
+> against Intel's own `compute-runtime` WSL documentation (Battlemage listed "Production quality,
+> WSL: Yes" in the official per-platform support matrix) and a real Arc Pro B70 running vLLM under
+> WSL2 at ~70 tok/s in a public Microsoft/WSL issue thread. **Intel Arc under WSL2 goes through
+> Level Zero/SYCL via WDDM paravirtualization through `/dev/dxg`** — a device this machine already
+> has — not through `/dev/dri` (irrelevant on WSL2) and not through Vulkan (genuinely absent: no
+> `dzn` ICD ships in Ubuntu's WSL mesa package, confirmed from Ubuntu's own packaging rules). The
+> missing piece was simply that **the Intel NEO/oneAPI runtime was never installed inside this WSL2
+> guest.** Phase 2 below is rewritten around this — do not act on the old "must run on Windows"
+> conclusion.
+>
+> Real caveats that come with this correction, specific to this exact machine:
+> - **CUDA + Intel runtime coexistence is a known collision risk**, not theoretical here since this
+>   machine already runs CUDA for the 5060 Ti: CUDA's OpenCL libraries on `LD_LIBRARY_PATH` can
+>   cause Intel's SYCL tooling to load NVIDIA's OpenCL runtime instead and segfault. Needs explicit
+>   `ONEAPI_DEVICE_SELECTOR` / `OCL_ICD_VENDORS` isolation before trusting `sycl-ls` output.
+> - An **open, unresolved** SYCL process-teardown hang exists (process becomes unkillable, needs
+>   `wsl --shutdown`) — observed on an Intel iGPU, **not confirmed either way on discrete
+>   Battlemage**. Treat as a real risk to watch for, not a confirmed blocker.
+> - WSL2's default VM memory/swap (50%/25% of Windows total RAM) can cause out-of-memory during
+>   model load for a 32GB-class model, independent of available VRAM — raise `.wslconfig`'s
+>   `memory`/`swap` before attempting to load a large model.
+> - No reliable sourced WSL2-vs-native-Linux performance delta was found for this path — treat the
+>   throughput numbers above as a native-Linux ceiling, not a WSL2 guarantee.
+> - Vulkan is confirmed absent from WSL2 either way — if the SYCL-in-WSL2 path doesn't pan out, the
+>   fallback is still Windows-native (Phase 2's original Option B, kept below), not Vulkan-in-WSL2.
+
+**Action item before anything else:** try the WSL2-native path first (Phase 0 below) — it's the
+cheaper thing to attempt and, if it works, removes an entire cross-machine networking phase from
+this blueprint. Only fall back to a Windows-native server if it doesn't pan out.
 
 ## 2. Why "two lanes" is the right design, not a fallback
 
@@ -55,13 +83,31 @@ sized to their hardware is strictly better for this workload shape.
 
 ### Phase 0 — Verify, don't assume (do this before installing anything)
 
-1. Confirm the B70 shows up in Windows Device Manager / `xpu-smi`.
-2. Decide: stay on Windows+WSL2 (the architecture below), or consider a native Linux boot later.
-   Every one of the B70's measured numbers above came from native Linux — if a Linux boot is ever
-   on the table, it reopens the possibility of running both cards from one OS (still not one
-   *process* — cross-vendor TP is still impossible there — but it simplifies networking between
-   the two lanes to `localhost` instead of a WSL2↔Windows hop). Not required to start; worth
-   knowing as a later option.
+1. **Try the WSL2-native SYCL path first** (this is the corrected recommendation — see the
+   correction note in §1). Inside this WSL2 guest: install Intel's NEO/compute-runtime packages
+   per [`intel/compute-runtime`'s `WSL.md`](https://github.com/intel/compute-runtime/blob/master/documentation/WSL.md)
+   (the guest-side `.deb`s: `intel-opencl-icd`, `libze-intel-gpu1`, gmmlib, IGC — from the NEO
+   GitHub releases, matched to the Windows host's Arc driver version), then run `sycl-ls` and/or
+   `clinfo`. If the B70 is enumerated, the WSL2-native path is viable — proceed with Phase 2's
+   Option A. If it isn't, or if you hit the CUDA/OpenCL-ICD collision (see §1's caveats — isolate
+   with `ONEAPI_DEVICE_SELECTOR`/`OCL_ICD_VENDORS` before concluding it's absent, don't let a
+   collision masquerade as "not found"), fall back to Phase 2's Option B (Windows-native).
+2. **Do not attempt to unify both GPUs into one Vulkan process.** This was investigated
+   specifically: Ubuntu's WSL2 Mesa package ships no `dzn` (Vulkan-on-D3D12) driver at all — it
+   would have to be self-built from source with `-Dvulkan-drivers=microsoft-experimental`, its
+   own build option name and a Mesa-emitted non-conformance warning both signal it's genuinely
+   experimental, and — the decisive reason to skip it — the NVIDIA card would lose its
+   `cooperative_matrix` tensor-core acceleration entirely under dzn (`matrix cores: none`,
+   confirmed from source), on top of a measured ~30% translation-tax vs. native Vulkan even on the
+   Intel side. Real capability (enumerating both GPUs in one process is mechanically confirmed
+   possible via dxcore adapter enumeration), wrong trade for this hardware. SYCL for the Arc + CUDA
+   for the 5060 Ti, as two independent lanes, beats this in every dimension that matters here.
+3. Confirm the B70 shows up in Windows Device Manager / Intel Arc Control regardless of which path
+   you end up on — needed either way, and it's the fastest way to rule out "not physically
+   installed" before debugging software.
+4. Optional, later: a native Linux boot would let both lanes share one OS trivially and matches
+   every published B70 benchmark's actual test environment — not required to start, since Phase 0
+   step 1 achieves the "one OS" benefit from inside WSL2 already, if it works.
 
 ### Phase 1 — Compact lane (near-zero new work; it's already running)
 
@@ -80,30 +126,43 @@ infrastructure:
 3. Keep `nomic-embed-text` (or your current embedding model) co-located on the same Ollama
    instance — no reason to move it, and `rag/config.py:3` already points both roles at one host.
 
-### Phase 2 — Expand lane (the real build work, on Windows, not WSL2)
+### Phase 2 — Expand lane
 
-1. **Pick the backend.** Two options, real tradeoff, don't default without deciding:
+**Option A — WSL2-native SYCL (try this first, per Phase 0 step 1).** Build llama.cpp with the
+SYCL backend against the oneAPI DPC++ toolchain, run `llama-server` inside this same WSL2 guest,
+reachable at `localhost:<port>` from everything else in the repo — no cross-machine networking,
+no Windows Firewall rule, no `.wslconfig` networking mode needed. This is the path behind every
+fast number cited in §1 (54.7 tok/s etc., measured on native Linux — treat as this option's
+ceiling, not a guarantee, since no sourced WSL2-vs-native delta exists yet for this exact setup).
+Before relying on it: raise `.wslconfig`'s `memory`/`swap` (WSL2 defaults to 50%/25% of Windows
+RAM, which can OOM a 32GB-class model load independent of available VRAM), and isolate the
+OpenCL/Level-Zero environment from CUDA's ICDs (`ONEAPI_DEVICE_SELECTOR`, `OCL_ICD_VENDORS`) given
+this machine runs both stacks side by side. Watch for (not necessarily hit): a known, open,
+unconfirmed-on-discrete-GPU SYCL process-teardown hang that can require `wsl --shutdown` to clear.
+
+**Option B — Windows-native (fallback if Option A doesn't pan out).** Two sub-choices, real
+tradeoff:
    - **Ollama + Vulkan on Windows** — fastest to stand up (Ollama's Windows build already ships
      Vulkan support), but measured ~2.2× slower decode than SYCL on this exact card family. Good
      for validating the architecture end-to-end quickly.
-   - **llama.cpp built with the SYCL backend, run via `llama-server`** — the path behind every
-     fast number in §1, requires installing Intel's oneAPI toolchain and building llama.cpp
-     against it. More setup, ~2× the throughput. This is the one to end up on if the expand lane
-     gets real use.
-   Recommendation: stand up Ollama+Vulkan first to validate the whole pipeline (routing, LOCI
-   integration, prompt format) works end-to-end, then swap the backend for llama.cpp SYCL once
-   the architecture is proven — the swap only touches Phase 3's client code, not anything else.
-2. **Pick the model.** For a coding-focused expand lane, look specifically for a coder-tuned
-   model in the 30-35B MoE class (matching the model size the 54.7 tok/s number was measured
-   against) or a dense 27-32B coder model if no suitable MoE coder variant exists — verify against
-   current benchmarks at build time, same caveat as Phase 1. Benchmark it with the same method
-   used for the compact lane so the two numbers are comparable.
-3. **If you want more than one expand-lane model available**, front `llama-server` with
-   [`llama-swap`](https://github.com/mostlygeek/llama-swap) — it gives an OpenAI-compatible
-   endpoint with on-demand model swapping, which is the proven pattern for this exact card.
-4. **Networking:** expose the Windows-side server on the host's LAN/WSL-visible IP (not just
-   `127.0.0.1`), and add a Windows Firewall inbound rule for the port. Confirm reachability from
-   inside WSL2 with a plain `curl` before wiring any project code to it.
+   - **llama.cpp built with the SYCL backend, run via `llama-server`, natively on Windows** —
+     same ~2× throughput advantage as Option A, at the cost of the cross-machine networking this
+     blueprint was originally built around (expose the Windows-side server on the host's
+     LAN/WSL-visible IP, not just `127.0.0.1`; add a Windows Firewall inbound rule; confirm
+     reachability from WSL2 with a plain `curl` before wiring project code to it).
+   Recommendation if you land here: stand up Ollama+Vulkan first to validate the whole pipeline
+   end-to-end, then swap to llama.cpp SYCL once the architecture is proven.
+
+Regardless of A or B:
+
+- **Pick the model.** For a coding-focused expand lane, look specifically for a coder-tuned
+  model in the 30-35B MoE class (matching the model size the 54.7 tok/s number was measured
+  against) or a dense 27-32B coder model if no suitable MoE coder variant exists — verify against
+  current benchmarks at build time, same caveat as Phase 1. Benchmark it with the same method
+  used for the compact lane so the two numbers are comparable.
+- **If you want more than one expand-lane model available**, front `llama-server` with
+  [`llama-swap`](https://github.com/mostlygeek/llama-swap) — it gives an OpenAI-compatible
+  endpoint with on-demand model swapping, which is the proven pattern for this exact card.
 
 ### Phase 3 — Code changes in this repo
 
@@ -153,6 +212,13 @@ routing failure.
   isn't clearly better than what already fits on the B70 alone.
 - **Do not** invest in IPEX-LLM — it's archived upstream (flagged "known security issues") and
   pinned to a stale Ollama version.
+- **Do not** try to unify both GPUs into one Vulkan process via a self-built Mesa `dzn` driver,
+  even though it's mechanically possible (one ICD can enumerate both an Intel and an NVIDIA D3D12
+  adapter in WSL2, confirmed from Mesa's dxcore adapter-enumeration source). It's explicitly
+  experimental/non-conformant per Mesa's own build option and startup warning, costs the NVIDIA
+  card its cooperative-matrix tensor-core path entirely, and loses ~30% vs. native Vulkan even on
+  the Intel side. Two lanes on their native backends (SYCL for Arc, CUDA for the 5060 Ti) beats
+  this outright.
 - **Do not** wait for cross-vendor tensor parallelism to mature. It's not a maturity gap; there is
   no cross-vendor collective communication library, and the open research on this (HetCCL,
   arXiv 2605.31000) is exactly that — research, not something to build a production plan around.
@@ -174,4 +240,16 @@ routing failure.
   including live measurement of this machine (`nvidia-smi`, `OLLAMA_DEBUG=1` device discovery),
   and the cross-vendor tensor-parallelism verdict in §2 of this document. All throughput numbers
   in this blueprint are sourced from that pass's citations (llama.cpp SYCL benchmarks, Ollama and
-  llama.cpp source code, official Arc Pro B70 / RTX 5060 Ti spec sheets).
+  llama.cpp source code, official Arc Pro B70 / RTX 5060 Ti spec sheets). This pass's own
+  Vulkan-visibility test (via Ollama's device discovery) was later found to be a false negative —
+  see the correction below.
+- Third pass: dedicated investigation of Intel Arc compute (Level Zero/SYCL, IPEX-LLM, OpenVINO)
+  specifically inside WSL2, sourced against Intel's `compute-runtime` WSL documentation, its NEO
+  release notes' per-platform WSL support matrix, and a real Arc Pro B70 running vLLM under WSL2
+  in a public Microsoft/WSL issue thread. Established that the second pass's "WSL2 can't see the
+  B70" conclusion was a false negative from testing exclusively through Ollama, which has no SYCL
+  backend at all — this correction is folded into §1 and Phase 0/2 above.
+- Fourth pass: dedicated investigation of Vulkan specifically inside WSL2 (Mesa's `dzn` driver),
+  confirming it's mechanically capable of exposing both GPUs to one process but is unshipped by
+  default, self-build-only, explicitly experimental, and costs the NVIDIA card its tensor-core
+  path — folded into Phase 0 step 2 and §4 above as an explicit "don't build this" with reasoning.
