@@ -1,8 +1,51 @@
 # Blueprint: High-Performing Coding Intelligence on Arc B70 + RTX 5060 Ti
 
-**Status:** Design blueprint, not yet implemented. Built directly from two research passes (see
-"Research trail" at the end) that measured this exact machine rather than guessing from generic
-dual-GPU advice.
+**Status: Phase 0 and Phase 2 Option A validated end-to-end on this machine** (2026-09-10). Built
+from four research passes (see "Research trail" at the end) that measured this exact machine
+rather than guessing from generic dual-GPU advice. See "Implementation log" below for what's
+actually running vs. still to do.
+
+## Implementation log
+
+- **Phase 0 confirmed:** Intel's NEO/compute-runtime + Level Zero loader installed in this WSL2
+  guest (`intel-opencl-icd`, `libze-intel-gpu1`, `libze1`/`libze-dev` from Ubuntu, IGC from
+  `intel/intel-graphics-compiler`, all pinned to release `26.31.39395.13`). `clinfo` and `sycl-ls`
+  both enumerate the Arc Pro B70 (`Intel(R) Graphics [0xe223]`, ~31.2GB) directly — the corrected
+  research was right, no Windows-native server needed.
+- **Phase 2 Option A confirmed:** llama.cpp built from source with `-DGGML_SYCL=ON` against the
+  Intel oneAPI DPC++ compiler (`icx`/`icpx`, installed via Intel's oneAPI apt repo — packages
+  `intel-oneapi-compiler-dpcpp-cpp` + `intel-oneapi-mkl-devel`). `llama-server` runs against the
+  B70 and serves real completions over its OpenAI-compatible endpoint.
+- **A real, non-obvious bug found and fixed along the way — record this precisely, it will bite
+  again on a fresh setup:** `llama-server` segfaults on this hardware/driver combo, both during
+  model load and during actual generation, inside `ur_command_list_manager::isGraphCaptureActive`
+  in Intel's **Level Zero v2** unified-runtime adapter (`libur_adapter_level_zero_v2.so.0`) — a
+  null-pointer dereference reached via SYCL's queue-submission path (`sycl::handler::finalize()` /
+  `queue_impl::isNativeRecording()`), hit by both llama.cpp's own `mul_mat` reorder optimization
+  and internally by oneMKL's SYCL BLAS `sgemm`. **Disabling `GGML_SYCL_GRAPH` at build time is not
+  sufficient by itself** — the crash still occurs during generation via oneMKL's own call path,
+  independent of that build flag. **The fix that actually works:** force the older, stable Level
+  Zero v1 adapter at runtime with `SYCL_UR_USE_LEVEL_ZERO_V2=0` (both adapter `.so`s ship
+  side-by-side in the oneAPI install; the v2 one is the default and is what crashes). With that
+  set, model load dropped from ~27s to ~2s (the v2 adapter's failing sysman queries were adding
+  real overhead, not just noise) and a real chat completion returned correctly. **Always export
+  `SYCL_UR_USE_LEVEL_ZERO_V2=0` before starting the expand-lane server** — this is not optional.
+- Also confirmed empirically: Intel's Level Zero sysman free-memory query fails on this setup
+  (`zesInit failed ... Sysman free-memory query may be unavailable`) — this is the exact,
+  previously-flagged-as-uncertain caveat from the third research pass, now confirmed to occur here
+  specifically, and harmless once a device is targeted explicitly (`--device SYCL0`) rather than
+  relying on automatic free-memory-based placement.
+- **Still to do:** pick and pull the actual target models (candidates identified from Ollama's
+  live library: `qwen2.5-coder:14b-instruct` class for the compact lane, `qwen3-coder:30b`
+  — a 30B-A3B MoE, architecturally the coder-specialized sibling of the model class already
+  benchmarked at 54.7 tok/s — for the expand lane); convert/fetch as GGUF for the expand lane
+  specifically, since `llama-server` needs a raw GGUF file, not Ollama's blob store; wire
+  `rag/llm.py`/`rag/embeddings.py` to the new per-role config (`rag/config.py` already has
+  `COMPACT_*`/`EXPAND_*`/`EMBEDDING_*`, added and tested); standardize the client on an
+  OpenAI-compatible interface so one implementation serves both `llama-server` and Ollama; add the
+  CARD-based routing policy; SQLite WAL mode fix; raise `.wslconfig` memory/swap before loading the
+  30B-class model (this WSL2 instance currently has only ~15GB RAM / 4GB swap — well short of the
+  "host RAM ≈ model size during load" risk flagged in research for a ~20GB Q4 file).
 
 **Verdict driving this whole document:** cross-vendor tensor parallelism (splitting one model's
 layers across the Intel and NVIDIA cards to make it *faster*) is not achievable — this was
