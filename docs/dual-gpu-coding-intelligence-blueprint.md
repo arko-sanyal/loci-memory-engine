@@ -250,9 +250,33 @@ routing failure.
 
 - **Do not** pursue `OLLAMA_LLM_LIBRARY=vulkan` to unify both cards into one Ollama Vulkan group.
   It's the one lever that technically works, and it's a net loss: ~2.2× slower on the Arc side,
-  10-18% slower on the 5060 Ti side (up to 6× on MoE prefill), plus a 20-40% PCIe penalty on this
-  machine's gen-4 link under multi-GPU layer split — all to reach a model size class (>32GB) that
-  isn't clearly better than what already fits on the B70 alone.
+  10-18% slower on the 5060 Ti side (up to 6× on MoE prefill) — all to reach a model size class
+  (>32GB) that isn't clearly better than what already fits on the B70 alone. (A fifth research
+  pass corrected an earlier version of this bullet that also cited a "20-40% PCIe penalty under
+  multi-GPU layer split" — that figure was unsourced and misattributed a bandwidth cost to a
+  mechanism whose actual per-token cross-device traffic is single-digit KB, nowhere near a
+  bandwidth problem. The conclusion above is unchanged; only that one unsupported number was
+  removed.)
+- **Do not** build a heterogeneous layer-split pooling tier (splitting one model's layers across
+  the Arc B70 and the RTX 5060 Ti via llama.cpp's vendor-agnostic `-sm layer`/`ggml-backend`
+  scheduler, e.g. as an escalation rung above the two-lane architecture for unusually hard
+  reasoning). Unlike cross-vendor tensor parallelism, this is NOT structurally blocked — device
+  enumeration and layer/KV placement in llama.cpp are genuinely vendor-agnostic, and
+  `GGML_BACKEND_DL` or the RPC backend could plausibly make CUDA+SYCL coexist in one inference
+  session. It's still the wrong call: (1) no VRAM pressure to relieve — the expand-lane target
+  (`qwen3-coder:30b`, ~18-19GB) already fits in the B70's 32GB alone; (2) layer-split buys
+  capacity, not speed — maintainer-confirmed and reproduced in the one published mixed-vendor case
+  (AMD+NVIDIA via Vulkan): combined decode lands near the *average* of the two cards, never the
+  sum; (3) cross-vendor pays an extra penalty same-vendor splits don't — every layer-boundary
+  crossing falls off the async fast path into a full backend drain plus host-staged copy,
+  source-confirmed at the exact llama.cpp code path; (4) it occupies both GPUs for the pooled
+  request's full duration, killing the always-warm compact lane that's the point of the two-lane
+  design; (5) zero documented Arc+NVIDIA cases by any mechanism, and this machine already has one
+  live SYCL bug (`SYCL_UR_USE_LEVEL_ZERO_V2=0`) that two separate processes can isolate but one
+  shared process couldn't. Full sourced research:
+  `docs/research/2026-09-10-heterogeneous-layer-split.md`. If a 70B+-class model ever becomes a
+  real requirement, revisit then, and start with the RPC-backend path (two separately-built
+  processes, loopback), not one binary with both backends compiled in.
 - **Do not** invest in IPEX-LLM — it's archived upstream (flagged "known security issues") and
   pinned to a stale Ollama version.
 - **Do not** try to unify both GPUs into one Vulkan process via a self-built Mesa `dzn` driver,
@@ -296,3 +320,10 @@ routing failure.
   confirming it's mechanically capable of exposing both GPUs to one process but is unshipped by
   default, self-build-only, explicitly experimental, and costs the NVIDIA card its tensor-core
   path — folded into Phase 0 step 2 and §4 above as an explicit "don't build this" with reasoning.
+- Fifth pass: dedicated investigation of heterogeneous layer-split pipelining (llama.cpp's
+  `ggml-backend` scheduler splitting one model's layers across the Arc B70 and RTX 5060 Ti,
+  distinct from tensor-parallel collectives), reading llama.cpp source at a pinned commit rather
+  than relying on secondary sources. Confirmed this mechanism is NOT structurally blocked the way
+  cross-vendor TP is, but is still the wrong architecture for this project — folded into §4 above.
+  Also corrected an unsourced "20-40% PCIe penalty" figure from the second pass. Full report:
+  `docs/research/2026-09-10-heterogeneous-layer-split.md`.
