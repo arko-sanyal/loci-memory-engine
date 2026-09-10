@@ -49,6 +49,24 @@ def test_expand_host_and_model_have_no_default(monkeypatch):
     assert reloaded.EXPAND_MODEL is None
 
 
+def test_generate_timeout_defaults_and_is_independent_of_connect_timeout(monkeypatch):
+    monkeypatch.delenv("RAG_GENERATE_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.setenv("RAG_OLLAMA_CONNECT_TIMEOUT_SECONDS", "1")
+
+    reloaded = importlib.reload(config)
+
+    assert reloaded.GENERATE_TIMEOUT_SECONDS == 120.0
+    assert reloaded.OLLAMA_CONNECT_TIMEOUT_SECONDS == 1.0
+
+
+def test_generate_timeout_reads_from_environment(monkeypatch):
+    monkeypatch.setenv("RAG_GENERATE_TIMEOUT_SECONDS", "45")
+
+    reloaded = importlib.reload(config)
+
+    assert reloaded.GENERATE_TIMEOUT_SECONDS == 45.0
+
+
 def test_expand_host_and_model_read_from_environment(monkeypatch):
     monkeypatch.setenv("RAG_EXPAND_HOST", "http://127.0.0.1:8080")
     monkeypatch.setenv("RAG_EXPAND_MODEL", "qwen2.5-coder-32b")

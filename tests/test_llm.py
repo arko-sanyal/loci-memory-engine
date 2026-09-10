@@ -42,6 +42,30 @@ def test_generate_raises_clear_error_when_ollama_unreachable(monkeypatch):
         generate("test")
 
 
+def test_generate_uses_separate_connect_and_read_timeouts(monkeypatch):
+    monkeypatch.setattr(config, "OLLAMA_CONNECT_TIMEOUT_SECONDS", 3.0)
+    monkeypatch.setattr(config, "GENERATE_TIMEOUT_SECONDS", 90.0)
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    def fake_post(url, json, timeout):
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr("rag.llm.httpx.post", fake_post)
+
+    generate("test")
+
+    assert captured["timeout"].connect == 3.0
+    assert captured["timeout"].read == 90.0
+
+
 def test_generate_rejects_unknown_role():
     with pytest.raises(ValueError, match="compact"):
         generate("test", role="bogus")

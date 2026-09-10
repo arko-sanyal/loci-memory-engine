@@ -23,11 +23,17 @@ def _resolve_role(role: str) -> tuple[str, str]:
 
 def generate(prompt: str, role: str = "compact") -> str:
     host, model = _resolve_role(role)
+    timeout = httpx.Timeout(
+        connect=config.OLLAMA_CONNECT_TIMEOUT_SECONDS,
+        read=config.GENERATE_TIMEOUT_SECONDS,
+        write=config.OLLAMA_CONNECT_TIMEOUT_SECONDS,
+        pool=config.OLLAMA_CONNECT_TIMEOUT_SECONDS,
+    )
     try:
         response = httpx.post(
             f"{host}/v1/chat/completions",
             json={"model": model, "messages": [{"role": "user", "content": prompt}]},
-            timeout=config.OLLAMA_CONNECT_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]

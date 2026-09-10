@@ -6,6 +6,12 @@ LLM_MODEL = os.environ.get("RAG_LLM_MODEL", "llama3.2")
 OLLAMA_CONNECT_TIMEOUT_SECONDS = float(
     os.environ.get("RAG_OLLAMA_CONNECT_TIMEOUT_SECONDS", "10")
 )
+# Separate from the connect timeout above: a real model's cold load + generation can take far
+# longer than a healthy connection should take to establish (a 14B model's first request loads
+# it into VRAM before generating a single token; a 30B+ expand-lane model longer still).
+GENERATE_TIMEOUT_SECONDS = float(
+    os.environ.get("RAG_GENERATE_TIMEOUT_SECONDS", "120")
+)
 CHROMA_DB_PATH = os.environ.get("RAG_CHROMA_DB_PATH", "./chroma_db")
 COLLECTION_NAME = os.environ.get("RAG_COLLECTION_NAME", "documents")
 DATA_DIR = os.environ.get("RAG_DATA_DIR", "./data")
