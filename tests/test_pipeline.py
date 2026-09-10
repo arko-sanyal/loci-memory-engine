@@ -69,9 +69,9 @@ def test_ingest_is_idempotent_on_rerun(isolated_store):
     second_count = ingest(str(data_dir))
 
     from rag.embeddings import embed
-    from rag.loci import LociEngine
+    from loci_engine.vectors import VectorStore
 
-    engine = LociEngine(path=config.CHROMA_DB_PATH)
+    engine = VectorStore(path=config.CHROMA_DB_PATH)
     [query_vector] = embed(["sky"])
     results = engine.query(query_vector, top_k=10)
 

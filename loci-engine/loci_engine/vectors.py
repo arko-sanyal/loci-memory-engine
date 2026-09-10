@@ -1,0 +1,157 @@
+import json
+import re
+import sqlite3
+import struct
+
+EMBEDDING_DIM = 768
+RRF_K = 60
+
+
+def _to_blob(vector: list[float]) -> bytes:
+    return struct.pack(f"{len(vector)}f", *vector)
+
+
+def _to_fts5_query(text: str) -> str | None:
+    """Turn arbitrary user text into a safe FTS5 MATCH query.
+
+    Natural-language input (e.g. "What color is the sky?") contains characters
+    that are significant to FTS5's own query syntax (?, -, ^, *, (, ), :, etc.)
+    and raises `sqlite3.OperationalError: fts5: syntax error` if passed through
+    unescaped. Extracting word tokens and quoting each one neutralizes any
+    operator meaning; joining with OR keeps the search permissive (a BM25
+    relevance signal, not a strict all-terms-must-match filter) since most
+    natural questions contain stopwords that won't appear in every match.
+    """
+    tokens = re.findall(r"\w+", text)
+    if not tokens:
+        return None
+    return " OR ".join(f'"{token}"' for token in tokens)
+
+
+class VectorStore:
+    def __init__(self, path: str):
+        self._conn = sqlite3.connect(path)
+        self._conn.enable_load_extension(True)
+        import sqlite_vec
+
+        sqlite_vec.load(self._conn)
+        self._conn.enable_load_extension(False)
+        self._conn.executescript(
+            f"""
+            CREATE TABLE IF NOT EXISTS chunk_meta (
+                chunk_id TEXT PRIMARY KEY,
+                rowid_map INTEGER UNIQUE,
+                text TEXT NOT NULL,
+                metadata TEXT NOT NULL
+            );
+            CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
+                embedding float[{EMBEDDING_DIM}]
+            );
+            CREATE VIRTUAL TABLE IF NOT EXISTS fts_chunks USING fts5(
+                chunk_id UNINDEXED, text
+            );
+            """
+        )
+        self._conn.commit()
+
+    def add(
+        self,
+        ids: list[str],
+        embeddings: list[list[float]],
+        texts: list[str],
+        metadatas: list[dict],
+    ) -> None:
+        for chunk_id, embedding, text, metadata in zip(ids, embeddings, texts, metadatas):
+            existing = self._conn.execute(
+                "SELECT rowid_map FROM chunk_meta WHERE chunk_id = ?", (chunk_id,)
+            ).fetchone()
+            if existing is not None:
+                row_id = existing[0]
+                self._conn.execute(
+                    "UPDATE chunk_meta SET text = ?, metadata = ? WHERE chunk_id = ?",
+                    (text, json.dumps(metadata), chunk_id),
+                )
+                self._conn.execute(
+                    "UPDATE vec_chunks SET embedding = ? WHERE rowid = ?",
+                    (_to_blob(embedding), row_id),
+                )
+                self._conn.execute(
+                    "UPDATE fts_chunks SET text = ? WHERE chunk_id = ?", (text, chunk_id)
+                )
+            else:
+                cursor = self._conn.execute(
+                    "INSERT INTO chunk_meta (chunk_id, text, metadata) VALUES (?, ?, ?)",
+                    (chunk_id, text, json.dumps(metadata)),
+                )
+                row_id = cursor.lastrowid
+                self._conn.execute(
+                    "UPDATE chunk_meta SET rowid_map = ? WHERE chunk_id = ?",
+                    (row_id, chunk_id),
+                )
+                self._conn.execute(
+                    "INSERT INTO vec_chunks (rowid, embedding) VALUES (?, ?)",
+                    (row_id, _to_blob(embedding)),
+                )
+                self._conn.execute(
+                    "INSERT INTO fts_chunks (chunk_id, text) VALUES (?, ?)", (chunk_id, text)
+                )
+        self._conn.commit()
+
+    def query(
+        self,
+        embedding: list[float],
+        top_k: int = 5,
+        query_text: str | None = None,
+    ) -> list[dict]:
+        fetch_k = max(top_k * 4, top_k)
+        dense_rows = self._conn.execute(
+            """
+            SELECT chunk_meta.chunk_id, vec_chunks.distance
+            FROM vec_chunks
+            JOIN chunk_meta ON chunk_meta.rowid_map = vec_chunks.rowid
+            WHERE embedding MATCH ? AND k = ?
+            ORDER BY distance
+            """,
+            (_to_blob(embedding), fetch_k),
+        ).fetchall()
+        dense_rank = {chunk_id: rank for rank, (chunk_id, _) in enumerate(dense_rows)}
+        dense_distance = {chunk_id: distance for chunk_id, distance in dense_rows}
+
+        sparse_rank: dict[str, int] = {}
+        fts5_query = _to_fts5_query(query_text) if query_text else None
+        if fts5_query:
+            sparse_rows = self._conn.execute(
+                """
+                SELECT chunk_id FROM fts_chunks
+                WHERE fts_chunks MATCH ? ORDER BY bm25(fts_chunks) LIMIT ?
+                """,
+                (fts5_query, fetch_k),
+            ).fetchall()
+            sparse_rank = {chunk_id: rank for rank, (chunk_id,) in enumerate(sparse_rows)}
+
+        all_ids = set(dense_rank) | set(sparse_rank)
+        scored = [
+            (
+                chunk_id,
+                (1.0 / (RRF_K + dense_rank[chunk_id] + 1) if chunk_id in dense_rank else 0.0)
+                + (1.0 / (RRF_K + sparse_rank[chunk_id] + 1) if chunk_id in sparse_rank else 0.0),
+            )
+            for chunk_id in all_ids
+        ]
+        scored.sort(key=lambda pair: pair[1], reverse=True)
+
+        results = []
+        for chunk_id, _ in scored[:top_k]:
+            row = self._conn.execute(
+                "SELECT text, metadata FROM chunk_meta WHERE chunk_id = ?", (chunk_id,)
+            ).fetchone()
+            text, metadata_json = row
+            results.append(
+                {
+                    "id": chunk_id,
+                    "text": text,
+                    "metadata": json.loads(metadata_json),
+                    "distance": dense_distance.get(chunk_id),
+                }
+            )
+        return results
