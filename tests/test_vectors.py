@@ -5,6 +5,15 @@ import pytest
 from loci_engine.vectors import VectorStore
 
 
+def test_close_closes_the_underlying_connection(tmp_path):
+    store = VectorStore(str(tmp_path / "loci.db"))
+
+    store.close()
+
+    with pytest.raises(Exception):
+        store._conn.execute("SELECT 1")
+
+
 def test_init_enables_wal_mode(tmp_path):
     store = VectorStore(str(tmp_path / "loci.db"))
 

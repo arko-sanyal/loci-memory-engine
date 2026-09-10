@@ -46,3 +46,22 @@ def test_add_fact_and_get_facts_via_facade(engine):
 
     assert len(facts) == 1
     assert facts[0]["value"] == "8766"
+
+
+def test_add_chunk_then_query_finds_it_by_embedding(engine):
+    embedding = [1.0, 0.0, 0.0] + [0.0] * 765
+    engine.add_chunk("c1", embedding, "the sky is blue", metadata={"source": "notes.txt"})
+
+    results = engine.query(embedding, top_k=3)
+
+    assert any(r["id"] == "c1" for r in results)
+
+
+def test_query_with_query_text_uses_hybrid_lexical_match(engine):
+    embedding_far = [0.0, 1.0, 0.0] + [0.0] * 765
+    engine.add_chunk("c2", embedding_far, "battery capacity is 4000mAh")
+
+    unrelated_query_embedding = [0.0, 0.0, 1.0] + [0.0] * 765
+    results = engine.query(unrelated_query_embedding, top_k=3, query_text="battery capacity")
+
+    assert any(r["id"] == "c2" for r in results)

@@ -13,7 +13,8 @@ Build plans: `docs/superpowers/plans/2026-09-10-loci-engine-memory-core.md` (thi
 | `loci_engine/schema.sql` | 09 (Appendix B) | Done | Applied via `db.open_db()`, idempotent (`CREATE TABLE IF NOT EXISTS`). |
 | `loci_engine/heat.py` | 09 (Appendix B) | Done | Implements paper 09 Appendix B.1's decay/increment/tier law only (direct-access hop=0 wired into the facade; 1/2/3-hop neighbor propagation needs an entity graph — deferred to Plan 3). Paper 05's per-tier half-life model (critical/high/decision/normal) and paper 06's GCSD switch are a separate, richer heat law for a later plan — do not conflate the two. |
 | `loci_engine/store.py` | 09 | Done | `remember_entity`/`touch_entity`/`get_entity`/`add_fact`/`get_facts`. `get_entity` is a non-mutating decay peek; only `touch_entity` persists a new heat value. |
-| `loci_engine/__init__.py` (`LociEngine` facade) | 09 | Done | `remember`/`recall`/`add_fact`/`get_facts` |
+| `loci_engine/__init__.py` (`LociEngine` facade) | 09 | Done | `remember`/`recall`/`add_fact`/`get_facts`/`add_chunk`/`query`. The last two were added to expose `vectors.py`'s hybrid retrieval through the facade, which previously only wrapped `store.py`. |
+| `loci_engine/mcp_server.py` | — (packaging, not a paper mechanism) | Done | MCP server exposing the facade's 6 methods as tools (`loci_remember`/`loci_recall`/`loci_add_fact`/`loci_get_facts`/`loci_add_chunk`/`loci_query`) for third-party agent integration. No auth scheme — single local store, unlike `loci-coordination-bus`. See root `README.md`'s "Connect LOCI to your own agent" section. |
 | Thoughts spectrum | 03 | Not started | Plan 3 |
 | Goal retainers / GCSD | 05, 06 | Not started | Plan 3 |
 | Entity graph / spreading activation (1/2/3-hop) | 07, 09 | Not started | Plan 3 |

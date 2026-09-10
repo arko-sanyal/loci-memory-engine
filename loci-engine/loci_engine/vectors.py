@@ -165,3 +165,6 @@ class VectorStore:
                 }
             )
         return results
+
+    def close(self) -> None:
+        self._conn.close()

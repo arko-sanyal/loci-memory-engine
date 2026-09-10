@@ -61,6 +61,71 @@ All environment-overridable, in `rag/config.py`:
 | `RAG_CHUNK_SIZE` / `RAG_CHUNK_OVERLAP` | `500` / `50` | Chunking parameters |
 | `RAG_LOCI_DB_PATH` | — | Path for the LOCI heat/fact store (see `loci-engine/INDEX.md` for current knobs) |
 
+## Connect LOCI to your own agent
+
+`loci_engine` is usable on its own, independent of the `rag` pipeline above — as a Python library,
+or as an MCP server any MCP-compatible agent (Claude Code, Claude Desktop, or your own) can call
+directly.
+
+**Scope, honestly stated:** this gives you entity/fact memory with heat-based decay and
+reinforcement, plus hybrid (dense + lexical) chunk search. It does **not** yet include fact
+versioning, goal tracking, forecasting, or reflection — see
+[`loci-engine/INDEX.md`](loci-engine/INDEX.md) and [`Sonnet-01.md`](Sonnet-01.md) for exactly
+what's built versus planned before you depend on anything beyond that.
+
+### As a Python library
+
+```bash
+.venv/bin/pip install -e .
+```
+
+```python
+from loci_engine import LociEngine
+
+engine = LociEngine("./my_agent_memory.sqlite3")
+
+engine.remember("user_timezone", gist="UTC-5, prefers evening check-ins")
+engine.add_fact("user_timezone", "offset", "-5", unit="hours", source="user-stated")
+
+entity = engine.recall("user_timezone")  # increments heat on access
+facts = engine.get_facts("user_timezone")
+
+# Hybrid semantic search — you supply the embedding (this library has no
+# opinion on which embedding model you use)
+engine.add_chunk("note-1", embedding=[...], text="the user prefers dark mode")
+results = engine.query(embedding=[...], top_k=5, query_text="UI preferences")
+
+engine.close()
+```
+
+### As an MCP server
+
+```bash
+.venv/bin/pip install -e '.[mcp]'
+LOCI_DB_PATH=./my_agent_memory.sqlite3 scripts/run_loci_mcp.sh
+```
+
+Exposes six tools over stdio: `loci_remember`, `loci_recall`, `loci_add_fact`, `loci_get_facts`,
+`loci_add_chunk`, `loci_query` — same semantics as the library methods above. Point your agent's
+MCP config at the launcher script, e.g. in `.mcp.json` or `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "loci-memory": {
+      "command": "bash",
+      "args": ["/absolute/path/to/scripts/run_loci_mcp.sh"],
+      "env": { "LOCI_DB_PATH": "/absolute/path/to/my_agent_memory.sqlite3" }
+    }
+  }
+}
+```
+
+No agent identity or authorization scheme is needed here — unlike
+[loci-coordination-bus](https://github.com/arko-sanyal/loci-coordination-bus) (a shared, multi-party
+bus), this is a single local memory store for one agent's own use, scoped by whatever file path you
+give it.
+
 ## Running the tests
 
 ```bash
