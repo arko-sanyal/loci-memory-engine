@@ -19,7 +19,7 @@ def remember_entity(
     conn.execute(
         """
         INSERT INTO isymprev (entity, gist, expanded, heat, confidence, uses, last_used)
-        VALUES (?, ?, ?, 1.0, 1.0, 0, ?)
+        VALUES (?, ?, ?, 0.333, 1.0, 0, ?)
         ON CONFLICT(entity) DO UPDATE SET
             gist = COALESCE(excluded.gist, isymprev.gist),
             expanded = COALESCE(excluded.expanded, isymprev.expanded)

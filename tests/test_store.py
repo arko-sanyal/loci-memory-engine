@@ -22,7 +22,7 @@ def test_remember_entity_creates_row_with_base_heat(conn):
 
     assert entity["entity"] == "battery_capacity"
     assert entity["gist"] == "how much charge it holds"
-    assert entity["heat"] == pytest.approx(1.0)
+    assert entity["heat"] == pytest.approx(0.333)
 
 
 def test_get_entity_surfaces_heat_tier(conn):
@@ -30,24 +30,24 @@ def test_get_entity_surfaces_heat_tier(conn):
 
     entity = get_entity(conn, "battery_capacity", now=1000.0)
 
-    # freshly-remembered entity sits at heat 1.0, which is WARM
-    # (HOT if heat > 1.5, WARM if heat > 0.5, else COLD).
-    assert entity["tier"] == "WARM"
+    # freshly-remembered entity sits at base heat 0.333, which is MILD
+    # (HOT if heat > 0.5, MILD if heat > 0.167, else COLD).
+    assert entity["tier"] == "MILD"
 
 
 def test_remember_entity_is_idempotent_and_does_not_reset_heat(conn):
     remember_entity(conn, "battery_capacity", now=1000.0)
-    touch_entity(conn, "battery_capacity", hop=0, now=1000.0)  # heat -> 2.0
+    touch_entity(conn, "battery_capacity", hop=0, now=1000.0)  # heat -> 0.6665
 
     remember_entity(conn, "battery_capacity", now=2000.0)  # re-mention, no explicit touch
 
     entity = get_entity(conn, "battery_capacity", now=2000.0)
     # remember_entity must not reset last_used, so the ~1000s gap since the
     # touch still decays normally; only touch_entity should ever reset the
-    # decay clock. The real decay over 1000 seconds is ~0.001187 (heat goes
-    # to ~1.998813), so abs=2e-3 comfortably covers it while still catching
-    # gross regressions (e.g. heat reset to 1.0, or jumping to 3.0).
-    assert entity["heat"] == pytest.approx(2.0, abs=2e-3)
+    # decay clock. The real decay over 1000 seconds from 0.6665 is tiny
+    # (~0.6656), so abs=2e-3 comfortably covers it while still catching
+    # gross regressions (e.g. heat reset to 0.333, or jumping to 1.0).
+    assert entity["heat"] == pytest.approx(0.6665, abs=2e-3)
 
 
 def test_touch_entity_applies_decay_then_increment(conn):
@@ -56,8 +56,9 @@ def test_touch_entity_applies_decay_then_increment(conn):
     one_day_later = 86400.0
     new_heat = touch_entity(conn, "battery_capacity", hop=0, now=one_day_later)
 
-    # decay(1.0, 1 day) = 0.95, then +1.0 direct-access increment = 1.95
-    assert new_heat == pytest.approx(1.95)
+    # decay(0.333, 1 day) = 0.31635, then +direct-access gap-closing (k=0.5)
+    # = 0.31635 + (1 - 0.31635) * 0.5 = 0.658175
+    assert new_heat == pytest.approx(0.658175)
 
 
 def test_touch_entity_raises_for_unknown_entity(conn):
@@ -73,12 +74,12 @@ def test_get_entity_applies_decay_without_mutating_storage(conn):
     remember_entity(conn, "battery_capacity", now=0.0)
 
     peeked = get_entity(conn, "battery_capacity", now=86400.0)
-    assert peeked["heat"] == pytest.approx(0.95)
+    assert peeked["heat"] == pytest.approx(0.31635)
 
     raw_row = conn.execute(
         "SELECT heat FROM isymprev WHERE entity = 'battery_capacity'"
     ).fetchone()
-    assert raw_row[0] == pytest.approx(1.0)
+    assert raw_row[0] == pytest.approx(0.333)
 
 
 def test_add_fact_requires_existing_entity(conn):

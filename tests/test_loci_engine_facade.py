@@ -15,27 +15,24 @@ def test_remember_then_recall_returns_touched_entity(engine):
 
     assert result["entity"] == "battery_capacity"
     assert result["gist"] == "how much charge it holds"
-    assert result["heat"] == pytest.approx(2.0)  # base 1.0 + direct-access +1.0
+    assert result["heat"] == pytest.approx(0.6665)  # base 0.333, closes half the gap to 1.0
 
 
 def test_recall_of_unknown_entity_returns_none(engine):
     assert engine.recall("nonexistent") is None
 
 
-def test_recall_increments_heat_on_repeated_access(engine):
+def test_recall_increments_heat_asymptotically_toward_one(engine):
     engine.remember("battery_capacity")
 
-    engine.recall("battery_capacity")
-    second = engine.recall("battery_capacity")
+    first = engine.recall("battery_capacity")["heat"]
+    second = engine.recall("battery_capacity")["heat"]
+    third = engine.recall("battery_capacity")["heat"]
 
-    assert second["heat"] == pytest.approx(3.0)  # clamped at HEAT_MAX
-
-    # A third recall would push an *unclamped* heat to 1.0+1.0+1.0+1.0 = 4.0,
-    # which is indistinguishable from the correctly-clamped 3.0 after only two
-    # recalls above. Asserting here too makes this test actually discriminate
-    # a missing clamp.
-    third = engine.recall("battery_capacity")
-    assert third["heat"] == pytest.approx(3.0)  # still clamped at HEAT_MAX
+    # each recall closes half the remaining gap to 1.0, so heat keeps
+    # increasing but can never reach or exceed 1.0, no matter how many times
+    # this loop runs.
+    assert first < second < third < 1.0
 
 
 def test_add_fact_and_get_facts_via_facade(engine):
