@@ -108,3 +108,48 @@ def test_query_text_with_no_word_tokens_skips_the_sparse_arm(tmp_path):
     results = store.query(embedding=[1.0] + [0.0] * 767, top_k=5, query_text="???")
 
     assert results[0]["id"] == "a"
+
+
+def test_rrf_tie_break_is_deterministic_by_ascending_chunk_id(tmp_path):
+    # "z" wins the dense arm outright (rank 0, exact embedding match) and never
+    # appears in the sparse arm (its text has no overlap with the query text).
+    # "s" wins the sparse arm outright (the only chunk containing "zephyr") and
+    # is excluded from the dense arm entirely by being ranked worse than
+    # fetch_k = max(top_k * 4, top_k) = 4 other, closer chunks. Both therefore
+    # score exactly 1 / (RRF_K + 0 + 1) = 1/61 from a single arm each - a
+    # genuine tie. Without a deterministic tiebreak, which of the two survives
+    # the top_k=1 cutoff depends on Python's (per-process, hash-randomized) set
+    # iteration order of {"z", "f1", "f2", "f3", "s"}. The documented tiebreak
+    # is ascending chunk_id, and "s" < "z" lexicographically, so "s" must win.
+    query_embedding = [1.0] + [0.0] * 767
+    store = VectorStore(str(tmp_path / "loci.db"))
+    store.add(
+        ids=["z", "f1", "f2", "f3", "s"],
+        embeddings=[
+            [1.0] + [0.0] * 767,  # z: exact match, dense rank 0
+            [0.9, 0.1] + [0.0] * 766,  # f1: dense rank 1
+            [0.8, 0.2] + [0.0] * 766,  # f2: dense rank 2
+            [0.7, 0.3] + [0.0] * 766,  # f3: dense rank 3
+            [0.0, 0.0, 1.0] + [0.0] * 765,  # s: farthest, excluded from top-4 dense
+        ],
+        texts=[
+            "points right",
+            "points mostly right",
+            "points somewhat right",
+            "points a little right",
+            "the zephyr blows through the canyon",
+        ],
+        metadatas=[
+            {"source": "z.txt"},
+            {"source": "f1.txt"},
+            {"source": "f2.txt"},
+            {"source": "f3.txt"},
+            {"source": "s.txt"},
+        ],
+    )
+
+    for _ in range(5):
+        results = store.query(
+            embedding=query_embedding, top_k=1, query_text="zephyr"
+        )
+        assert results[0]["id"] == "s"

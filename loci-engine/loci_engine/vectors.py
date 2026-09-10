@@ -138,7 +138,7 @@ class VectorStore:
             )
             for chunk_id in all_ids
         ]
-        scored.sort(key=lambda pair: pair[1], reverse=True)
+        scored.sort(key=lambda pair: (-pair[1], pair[0]))
 
         results = []
         for chunk_id, _ in scored[:top_k]:
