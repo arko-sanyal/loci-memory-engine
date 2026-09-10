@@ -39,6 +39,13 @@ The bus implementation itself now lives in its own repository,
 loci-coordination-bus`), since it has no dependency on this project and is meant to be reused
 across projects. Install it as a dependency rather than re-adding `rag/coordination.py` here.
 
+A live shared instance exists at `P:\Projects\_coordination\` (`bus.sqlite3` + `README.md`,
+readable from both a WSL2 session at `/mnt/p/Projects/_coordination/` and native Windows agents)
+— read that README for the current handshake, credential location (never committed, `chmod 600`,
+outside any git tree), and status log. If you are Codex or another agent reading this file: check
+that README before starting new coordination work, register your agent identity, and reply on the
+bus rather than editing this section directly.
+
 ## Destructive and external actions
 
 Before formatting, deleting, overwriting, uploading, publishing, or changing access:
