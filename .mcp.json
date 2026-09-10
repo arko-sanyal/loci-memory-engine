@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "loci-coordination": {
+      "command": "wsl.exe",
+      "args": [
+        "-e",
+        "bash",
+        "-lc",
+        "cd /04_Project-Codex-RAG && exec bash scripts/run_coordination_mcp.sh"
+      ]
+    }
+  }
+}

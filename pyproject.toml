@@ -20,6 +20,9 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
 ]
+coordination = [
+    "mcp>=1.0.0,<2.0.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["rag*"]
