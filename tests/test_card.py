@@ -24,16 +24,27 @@ def test_recall_depth_matches_card_paper_table():
     assert RECALL_DEPTH["temporal_reasoning"] == 7
 
 
-def test_apply_ranking_strategy_orders_knowledge_update_by_recency_descending():
+def test_apply_ranking_strategy_orders_knowledge_update_by_heat_descending():
     results = [
-        {"text": "old", "metadata": {"moddate": "2026-01-01T00:00:00-00:00"}},
-        {"text": "new", "metadata": {"moddate": "2026-06-01T00:00:00-00:00"}},
-        {"text": "mid", "metadata": {"moddate": "2026-03-01T00:00:00-00:00"}},
+        {"text": "cold", "heat": 0.1},
+        {"text": "hot", "heat": 0.6},
+        {"text": "mild", "heat": 0.3},
     ]
 
     ordered = apply_ranking_strategy("knowledge_update", results)
 
-    assert [r["text"] for r in ordered] == ["new", "mid", "old"]
+    assert [r["text"] for r in ordered] == ["hot", "mild", "cold"]
+
+
+def test_apply_ranking_strategy_knowledge_update_ties_break_by_recency():
+    results = [
+        {"text": "older", "heat": 0.5, "metadata": {"moddate": "2026-01-01"}},
+        {"text": "newer", "heat": 0.5, "metadata": {"moddate": "2026-06-01"}},
+    ]
+
+    ordered = apply_ranking_strategy("knowledge_update", results)
+
+    assert [r["text"] for r in ordered] == ["newer", "older"]
 
 
 def test_apply_ranking_strategy_orders_temporal_reasoning_chronologically():
@@ -59,10 +70,10 @@ def test_apply_ranking_strategy_leaves_other_categories_unchanged():
     assert [r["text"] for r in ordered] == ["b", "a"]
 
 
-def test_apply_ranking_strategy_tolerates_missing_date_metadata():
+def test_apply_ranking_strategy_knowledge_update_tolerates_missing_heat():
     results = [
-        {"text": "no-date", "metadata": {}},
-        {"text": "dated", "metadata": {"moddate": "2026-01-01T00:00:00-00:00"}},
+        {"text": "no-heat", "metadata": {}},
+        {"text": "has-heat", "heat": 0.4, "metadata": {}},
     ]
 
     ordered = apply_ranking_strategy("knowledge_update", results)

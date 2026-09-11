@@ -6,15 +6,12 @@ Implements the portable core of the CARD scheme described in
 are conditioned on a query category, assigned by a rule-based keyword
 heuristic (one of the three classification options the paper allows).
 
-This module ranks document chunks from the sqlite-vec/FTS5 store (`loci_engine.vectors`)
-by raw metadata dates, not by real heat - it does not yet consume `loci_engine`'s
-isymprev/qsymprev heat/fact store (that store exists and is tested; wiring CARD's
-ranking to it is tracked as Plan 2 in `loci-engine/INDEX.md`, not done here). There is
-also no entity co-occurrence graph or fact versioning yet, so this implements only what
-raw dates support: category-adaptive K, a recency tie-break for knowledge-update
-queries, and timestamp-aware ordering for temporal-reasoning queries. The paper's
-multi-session-reasoning graph-hop expansion is not implemented (no entity graph exists)
-- that category only gets the deeper K.
+This module ranks knowledge_update results by real heat from
+`loci_engine.vectors.VectorStore` (recency as a tie-break when heat is
+equal or absent), and temporal_reasoning results by document metadata
+dates - there is still no entity co-occurrence graph or fact versioning
+consumed here beyond heat itself, so multi_session_reasoning still only
+gets the deeper K without graph-hop expansion (tracked as a later plan).
 """
 
 RECALL_DEPTH = {
@@ -57,9 +54,12 @@ def apply_ranking_strategy(category: str, results: list[dict]) -> list[dict]:
     if category == "knowledge_update":
         return sorted(
             results,
-            key=lambda r: r["metadata"].get("moddate")
-            or r["metadata"].get("creationdate")
-            or "",
+            key=lambda r: (
+                r.get("heat", 0.0),
+                r.get("metadata", {}).get("moddate")
+                or r.get("metadata", {}).get("creationdate")
+                or "",
+            ),
             reverse=True,
         )
     if category == "temporal_reasoning":

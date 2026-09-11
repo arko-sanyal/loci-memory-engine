@@ -3,6 +3,9 @@ import os
 import re
 import sqlite3
 import struct
+import time
+
+from loci_engine.heat import apply_increment, decay
 
 EMBEDDING_DIM = 768
 RRF_K = 60
@@ -52,7 +55,9 @@ class VectorStore:
                 chunk_id TEXT PRIMARY KEY,
                 rowid_map INTEGER UNIQUE,
                 text TEXT NOT NULL,
-                metadata TEXT NOT NULL
+                metadata TEXT NOT NULL,
+                heat REAL DEFAULT 0.333,
+                last_used REAL
             );
             CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
                 embedding float[{EMBEDDING_DIM}]
@@ -90,8 +95,9 @@ class VectorStore:
                 )
             else:
                 cursor = self._conn.execute(
-                    "INSERT INTO chunk_meta (chunk_id, text, metadata) VALUES (?, ?, ?)",
-                    (chunk_id, text, json.dumps(metadata)),
+                    "INSERT INTO chunk_meta (chunk_id, text, metadata, last_used) "
+                    "VALUES (?, ?, ?, ?)",
+                    (chunk_id, text, json.dumps(metadata), time.time()),
                 )
                 row_id = cursor.lastrowid
                 self._conn.execute(
@@ -150,20 +156,31 @@ class VectorStore:
         ]
         scored.sort(key=lambda pair: (-pair[1], pair[0]))
 
+        now = time.time()
         results = []
         for chunk_id, _ in scored[:top_k]:
             row = self._conn.execute(
-                "SELECT text, metadata FROM chunk_meta WHERE chunk_id = ?", (chunk_id,)
+                "SELECT text, metadata, heat, last_used FROM chunk_meta WHERE chunk_id = ?",
+                (chunk_id,),
             ).fetchone()
-            text, metadata_json = row
+            text, metadata_json, heat, last_used = row
+            days_elapsed = max(0.0, (now - (last_used or now)) / 86400.0)
+            decayed = decay(heat, days_elapsed)
+            new_heat = apply_increment(decayed, hop=0)
+            self._conn.execute(
+                "UPDATE chunk_meta SET heat = ?, last_used = ? WHERE chunk_id = ?",
+                (new_heat, now, chunk_id),
+            )
             results.append(
                 {
                     "id": chunk_id,
                     "text": text,
                     "metadata": json.loads(metadata_json),
                     "distance": dense_distance.get(chunk_id),
+                    "heat": new_heat,
                 }
             )
+        self._conn.commit()
         return results
 
     def close(self) -> None:

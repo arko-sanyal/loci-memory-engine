@@ -180,3 +180,24 @@ def test_init_raises_helpful_error_when_path_is_a_directory(tmp_path):
 
     with pytest.raises(RuntimeError, match="directory"):
         VectorStore(str(leftover_chroma_dir))
+
+
+def test_chunks_start_at_base_heat_and_touch_on_query(tmp_path):
+    store = VectorStore(str(tmp_path / "loci.db"))
+    embedding = [1.0, 0.0, 0.0] + [0.0] * 765
+    store.add(["c1"], [embedding], ["the sky is blue"], [{}])
+
+    results = store.query(embedding, top_k=1)
+
+    assert results[0]["heat"] == pytest.approx(0.333 + (1 - 0.333) * 0.5)
+
+
+def test_repeated_queries_increase_chunk_heat(tmp_path):
+    store = VectorStore(str(tmp_path / "loci.db"))
+    embedding = [1.0, 0.0, 0.0] + [0.0] * 765
+    store.add(["c1"], [embedding], ["the sky is blue"], [{}])
+
+    first = store.query(embedding, top_k=1)[0]["heat"]
+    second = store.query(embedding, top_k=1)[0]["heat"]
+
+    assert second > first
