@@ -33,7 +33,8 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "LOCI-Engine-Setup-${version}.exe"
     }
   }
 }
