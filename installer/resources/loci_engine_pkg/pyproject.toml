@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "loci-engine"
+version = "0.1.0"
+description = "Heat-tiered entity/fact memory with hybrid (dense + lexical) chunk search"
+requires-python = ">=3.11"
+dependencies = [
+    "sqlite-vec>=0.1.9",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.0.0"]
+
+[project.scripts]
+loci-engine-mcp = "loci_engine.mcp_server:main"
+
+[tool.setuptools.package-data]
+loci_engine = ["schema.sql"]

@@ -7,3 +7,6 @@ data/
 chroma_db/
 
 .loci/
+
+# Personal Claude Code settings (machine-specific hook paths, not shared)
+.claude/settings.local.json

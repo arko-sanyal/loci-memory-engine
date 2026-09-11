@@ -1,0 +1,31 @@
+body {
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  margin: 0;
+  padding: 24px;
+  background: #1e1e1e;
+  color: #ddd;
+}
+h1 { font-size: 18px; margin-bottom: 16px; }
+h2 { font-size: 14px; color: #9cd; }
+pre {
+  background: #111;
+  padding: 10px;
+  border-radius: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-size: 12px;
+}
+.field { margin-bottom: 18px; }
+label { display: block; margin-bottom: 6px; font-size: 13px; color: #aaa; }
+select, button {
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: 1px solid #444;
+  background: #2a2a2a;
+  color: #ddd;
+}
+button:disabled { opacity: 0.4; }
+button:not(:disabled) { cursor: pointer; }
+.chosen { font-size: 12px; color: #8c8; word-break: break-all; }

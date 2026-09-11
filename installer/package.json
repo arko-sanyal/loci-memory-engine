@@ -1,0 +1,39 @@
+{
+  "name": "loci-engine-installer",
+  "version": "1.0.0",
+  "description": "GUI installer that wires loci_engine (memory) and its PostCompact recall hook into an existing Claude Code project",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.arkosanyal.loci-engine-installer",
+    "productName": "LOCI Engine Setup",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "templates/**/*",
+      "resources/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

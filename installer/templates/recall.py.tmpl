@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""Semantic + heat-mapped recall over this agent's own auto-memory files.
+
+Self-contained by design: unlike the original loci-memory-engine prototype
+this was adapted from, this file depends only on `loci_engine` + `ollama` -
+never on that project's `rag` package - so it works standalone on any
+machine the installer targets. The query-classification logic below
+(`classify_query_category`/`recall_depth`/`RECALL_DEPTH`) is vendored
+(copied, not imported) from that project's `rag/card.py` for that reason;
+keep it in sync by hand if the source ever changes it.
+
+Usage:
+    python3 recall.py --reindex
+    python3 recall.py "what's the status of the coordination bus?"
+
+Requires Ollama running locally with nomic-embed-text pulled.
+"""
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+import ollama
+
+from loci_engine import LociEngine
+from loci_engine.heat import tier as heat_tier
+
+MEMORY_DIR = Path(__file__).parent
+DB_PATH = "{{DB_PATH}}"
+NAMESPACE = "{{NAMESPACE}}"
+EMBED_MODEL = "nomic-embed-text"
+EMBED_CHAR_LIMIT = 4000  # nomic-embed-text's context window rejects some full files
+
+# --- vendored from rag/card.py (CARD: Category-Adaptive Recall Depth) ---
+
+RECALL_DEPTH = {
+    "information_extraction": 5,
+    "knowledge_update": 3,
+    "multi_session_reasoning": 10,
+    "temporal_reasoning": 7,
+}
+
+_KNOWLEDGE_UPDATE_KEYWORDS = (
+    "update", "updated", "change", "changed", "now", "current",
+    "currently", "latest", "revised", "as of",
+)
+_TEMPORAL_KEYWORDS = (
+    "when", "before", "after", "history", "over time", "timeline",
+    "previously", "used to", "evolve", "evolution",
+)
+_MULTI_SESSION_KEYWORDS = (
+    "compare", "across", "summarize", "summarise", "overall", "combine",
+    "synthesize", "synthesise", "throughout", "every",
+)
+
+
+def classify_query_category(question: str) -> str:
+    q = question.lower()
+    if any(keyword in q for keyword in _KNOWLEDGE_UPDATE_KEYWORDS):
+        return "knowledge_update"
+    if any(keyword in q for keyword in _TEMPORAL_KEYWORDS):
+        return "temporal_reasoning"
+    if any(keyword in q for keyword in _MULTI_SESSION_KEYWORDS):
+        return "multi_session_reasoning"
+    return "information_extraction"
+
+
+def recall_depth(category: str) -> int:
+    return RECALL_DEPTH[category]
+
+
+def embed(texts: list[str]) -> list[list[float]]:
+    client = ollama.Client()
+    return [client.embeddings(model=EMBED_MODEL, prompt=text)["embedding"] for text in texts]
+
+# --- end vendored section ---
+
+
+def _slug(path: Path) -> str:
+    return NAMESPACE + path.stem
+
+
+def _parse_frontmatter(text: str) -> tuple[str, str]:
+    """Return (description, body) - body has the frontmatter block stripped."""
+    match = re.match(r"^---\n(.*?)\n---\n(.*)$", text, re.DOTALL)
+    if not match:
+        return "", text
+    frontmatter, body = match.groups()
+    desc_match = re.search(r"^description:\s*(.+)$", frontmatter, re.MULTILINE)
+    description = desc_match.group(1).strip().strip('"') if desc_match else ""
+    return description, body.strip()
+
+
+def iter_memory_files():
+    for path in sorted(MEMORY_DIR.glob("*.md")):
+        if path.name == "MEMORY.md":
+            continue  # the index itself, not a memory entry
+        yield path
+
+
+def reindex() -> None:
+    engine = LociEngine(DB_PATH)
+    texts_to_embed = []
+    entities = []
+    for path in iter_memory_files():
+        raw = path.read_text()
+        description, body = _parse_frontmatter(raw)
+        entity = _slug(path)
+        engine.remember(entity, gist=description or entity, expanded=body)
+        texts_to_embed.append(body)
+        entities.append(entity)
+        print(f"indexed entity: {entity}")
+
+    if texts_to_embed:
+        excerpts = [text[:EMBED_CHAR_LIMIT] for text in texts_to_embed]
+        embeddings = embed(excerpts)
+        for entity, text, embedding in zip(entities, texts_to_embed, embeddings):
+            engine.add_chunk(entity, embedding, text, metadata={"file": f"{entity}.md"})
+        print(f"embedded {len(entities)} memory files")
+
+    engine.close()
+
+
+def recall(query: str) -> None:
+    engine = LociEngine(DB_PATH)
+
+    category = classify_query_category(query)
+    depth = recall_depth(category)
+    print(f"category: {category}  (recall depth: {depth})\n")
+
+    [query_embedding] = embed([query])
+    candidates = engine.query(query_embedding, top_k=depth * 6, query_text=query)
+    candidates = [c for c in candidates if c["id"].startswith(NAMESPACE)][: depth * 3]
+
+    ranked = []
+    for candidate in candidates:
+        entity_name = candidate["id"]
+        entry = engine.recall(entity_name)  # touches heat - this recall itself has value
+        if entry is None:
+            continue
+        ranked.append((entry["heat"], entity_name, entry))
+
+    ranked.sort(key=lambda row: row[0], reverse=True)
+
+    for heat, entity_name, entry in ranked[:depth]:
+        tier_label = heat_tier(heat)
+        display_name = entity_name.removeprefix(NAMESPACE)
+        print(f"[{tier_label}] {display_name}  (heat={heat:.3f})")
+        print(f"  {entry['gist']}")
+        if tier_label == "HOT":
+            print(f"\n  --- full content (HOT, expanding) ---\n")
+            print("  " + (entry["expanded"] or "").replace("\n", "\n  "))
+            print()
+        print()
+
+    engine.close()
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print(__doc__)
+        sys.exit(1)
+    if sys.argv[1] == "--reindex":
+        reindex()
+    else:
+        recall(" ".join(sys.argv[1:]))
