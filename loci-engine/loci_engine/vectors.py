@@ -67,6 +67,18 @@ class VectorStore:
             );
             """
         )
+        # CREATE TABLE IF NOT EXISTS is a no-op against a chunk_meta table that
+        # already existed before heat/last_used were added (Plan 3 Task 3) - it
+        # does not retroactively add columns. Migrate any pre-existing database
+        # here so `heat` reads never hit "no such column" on a database created
+        # before this change.
+        existing_columns = {
+            row[1] for row in self._conn.execute("PRAGMA table_info(chunk_meta)")
+        }
+        if "heat" not in existing_columns:
+            self._conn.execute("ALTER TABLE chunk_meta ADD COLUMN heat REAL DEFAULT 0.333")
+        if "last_used" not in existing_columns:
+            self._conn.execute("ALTER TABLE chunk_meta ADD COLUMN last_used REAL")
         self._conn.commit()
 
     def add(

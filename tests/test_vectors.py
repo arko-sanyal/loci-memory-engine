@@ -1,3 +1,4 @@
+import sqlite3
 import json
 
 import pytest
@@ -190,6 +191,34 @@ def test_chunks_start_at_base_heat_and_touch_on_query(tmp_path):
     results = store.query(embedding, top_k=1)
 
     assert results[0]["heat"] == pytest.approx(0.333 + (1 - 0.333) * 0.5)
+
+
+def test_opening_a_pre_heat_column_database_migrates_it(tmp_path):
+    # Simulates a chunk_meta table created before Plan 3 Task 3 added
+    # heat/last_used - CREATE TABLE IF NOT EXISTS is a no-op against an
+    # existing table with fewer columns, so VectorStore must migrate it
+    # explicitly rather than silently fail on the next heat read/write.
+    db_path = str(tmp_path / "pre_existing.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE chunk_meta ("
+        "chunk_id TEXT PRIMARY KEY, rowid_map INTEGER UNIQUE, "
+        "text TEXT NOT NULL, metadata TEXT NOT NULL)"
+    )
+    conn.commit()
+    conn.close()
+
+    store = VectorStore(db_path)
+    columns = {row[1] for row in store._conn.execute("PRAGMA table_info(chunk_meta)")}
+    assert "heat" in columns
+    assert "last_used" in columns
+
+    # And the store must actually be usable afterward, not just have the columns.
+    embedding = [1.0, 0.0, 0.0] + [0.0] * 765
+    store.add(["c1"], [embedding], ["migrated fine"], [{}])
+    results = store.query(embedding, top_k=1)
+    assert results[0]["heat"] == pytest.approx(0.333 + (1 - 0.333) * 0.5)
+    store.close()
 
 
 def test_repeated_queries_increase_chunk_heat(tmp_path):
