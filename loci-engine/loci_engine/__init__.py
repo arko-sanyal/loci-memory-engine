@@ -26,12 +26,18 @@ class LociEngine:
         key: str,
         value: str,
         unit: str | None = None,
-        source: str | None = None,
-    ) -> int:
-        return store.add_fact(self._conn, entity, key, value, unit=unit, source=source)
+        source=None,
+        confidence: float = 1.0,
+    ) -> dict:
+        return store.add_fact(
+            self._conn, entity, key, value, unit=unit, source=source, confidence=confidence
+        )
 
     def get_facts(self, entity: str, key: str | None = None) -> list[dict]:
         return store.get_facts(self._conn, entity, key=key)
+
+    def get_fact_history(self, entity: str, key: str) -> list[dict]:
+        return store.get_fact_history(self._conn, entity, key)
 
     def add_chunk(
         self,

@@ -45,6 +45,15 @@ def test_add_fact_and_get_facts_via_facade(engine):
     assert facts[0]["value"] == "8766"
 
 
+def test_facade_add_fact_returns_a_result_dict_not_a_bare_id(engine):
+    engine.remember("server_config")
+
+    result = engine.add_fact("server_config", "port", "8766")
+
+    assert result["accepted"] is True
+    assert isinstance(result["fact_id"], int)
+
+
 def test_add_chunk_then_query_finds_it_by_embedding(engine):
     embedding = [1.0, 0.0, 0.0] + [0.0] * 765
     engine.add_chunk("c1", embedding, "the sky is blue", metadata={"source": "notes.txt"})

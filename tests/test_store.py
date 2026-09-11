@@ -1,9 +1,11 @@
 import pytest
 
 from loci_engine.db import open_db
+from loci_engine.provenance import UserStated
 from loci_engine.store import (
     add_fact,
     get_entity,
+    get_fact_history,
     get_facts,
     remember_entity,
     touch_entity,
@@ -90,13 +92,13 @@ def test_add_fact_requires_existing_entity(conn):
 def test_add_fact_and_get_facts_roundtrip(conn):
     remember_entity(conn, "server_config", now=1000.0)
 
-    fact_id = add_fact(
+    result = add_fact(
         conn, "server_config", "port", "8766", unit="tcp", source="measured", now=1000.0
     )
 
     facts = get_facts(conn, "server_config")
     assert len(facts) == 1
-    assert facts[0]["id"] == fact_id
+    assert facts[0]["id"] == result["fact_id"]
     assert facts[0]["key"] == "port"
     assert facts[0]["value"] == "8766"
     assert facts[0]["unit"] == "tcp"
@@ -112,3 +114,84 @@ def test_get_facts_filters_by_key(conn):
 
     assert len(facts) == 1
     assert facts[0]["key"] == "port"
+
+
+def test_add_fact_first_write_is_always_accepted(conn):
+    remember_entity(conn, "server_config", now=1000.0)
+
+    result = add_fact(conn, "server_config", "port", "8766", now=1000.0)
+
+    assert result["accepted"] is True
+    assert result["fact_id"] is not None
+
+
+def test_add_fact_returns_current_version_only_by_default(conn):
+    remember_entity(conn, "user_profile", now=1000.0)
+    add_fact(conn, "user_profile", "address", "Dhaka", source=UserStated("Dhaka"), now=1000.0)
+
+    facts = get_facts(conn, "user_profile", key="address")
+
+    assert len(facts) == 1
+    assert facts[0]["value"] == "Dhaka"
+    assert facts[0]["valid_until"] is None
+
+
+def test_higher_trust_challenger_overrides_lower_trust_incumbent(conn):
+    remember_entity(conn, "user_profile", now=1000.0)
+    # model_inferred incumbent (trust 0.7), heat at base 0.333 after remember_entity
+    add_fact(conn, "user_profile", "address", "Old City", source="model_inferred", now=1000.0)
+
+    # user_stated challenger (trust 1.0 >= 0.7) - easier gate (x0.8):
+    # fires if new_confidence > incumbent_heat * 0.8 = 0.333 * 0.8 = 0.2664.
+    # add_fact's default confidence is 1.0, well above that.
+    result = add_fact(
+        conn, "user_profile", "address", "Dhaka",
+        source=UserStated("Dhaka"), now=2000.0,
+    )
+
+    assert result["accepted"] is True
+    current = get_facts(conn, "user_profile", key="address")
+    assert len(current) == 1
+    assert current[0]["value"] == "Dhaka"
+
+    history = get_fact_history(conn, "user_profile", "address")
+    assert len(history) == 2
+    assert history[0]["value"] == "Old City"
+    assert history[0]["valid_until"] is not None
+    assert history[1]["value"] == "Dhaka"
+    assert history[1]["supersedes"] == "Old City"
+
+
+def test_lower_trust_challenger_is_rejected_against_a_confident_incumbent(conn):
+    remember_entity(conn, "user_profile", now=1000.0)
+    # user_stated incumbent (trust 1.0). A fact's own heat is set once from
+    # its parent entity's heat at write time (0.333, the base heat) and is
+    # NOT re-synced by later touch_entity calls on the parent - a fact's
+    # confidence reflects its own history, not incidental entity-level
+    # activity on an unrelated key - so the gate math below uses 0.333.
+    add_fact(conn, "user_profile", "home_city", "Dhaka", source=UserStated("Dhaka"), now=1000.0)
+
+    # system_derived challenger (trust 0.5 < 1.0) - harder gate (x1.2):
+    # fires if new_confidence > incumbent_heat * 1.2 = 0.333 * 1.2 = 0.3996.
+    # 0.3 is comfortably below that, so this exercises the rejection path.
+    result = add_fact(
+        conn, "user_profile", "home_city", "Somewhere else",
+        source="system_derived", confidence=0.3, now=2000.0,
+    )
+
+    assert result["accepted"] is False
+    assert result["fact_id"] is None
+    current = get_facts(conn, "user_profile", key="home_city")
+    assert current[0]["value"] == "Dhaka"  # untouched
+
+
+def test_get_fact_history_orders_by_valid_from(conn):
+    remember_entity(conn, "e", now=1000.0)
+    add_fact(conn, "e", "k", "v1", source=UserStated("v1"), now=1000.0)
+    add_fact(conn, "e", "k", "v2", source=UserStated("v2"), now=2000.0)
+    add_fact(conn, "e", "k", "v3", source=UserStated("v3"), now=3000.0)
+
+    history = get_fact_history(conn, "e", "k")
+
+    assert [h["value"] for h in history] == ["v1", "v2", "v3"]
+    assert history[-1]["valid_until"] is None

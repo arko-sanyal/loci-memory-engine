@@ -15,9 +15,13 @@ CREATE TABLE IF NOT EXISTS qsymprev (
     value TEXT NOT NULL,
     unit TEXT,
     ts REAL,
-    heat REAL DEFAULT 1.0,
+    heat REAL DEFAULT 0.333,
     confidence REAL DEFAULT 1.0,
-    source TEXT
+    source TEXT,
+    source_trust REAL DEFAULT 0.5,
+    supersedes TEXT,
+    valid_from REAL,
+    valid_until REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_qsymprev_entity ON qsymprev(entity);
