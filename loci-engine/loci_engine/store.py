@@ -44,15 +44,16 @@ def get_entity(conn, entity: str, now: float | None = None) -> dict | None:
         return None
     entity_, gist, heat, confidence, uses, last_used, expanded = row
     decayed_heat = _decayed_heat(heat, last_used, now)
+    current_tier = tier(decayed_heat)
     return {
         "entity": entity_,
         "gist": gist,
         "heat": decayed_heat,
-        "tier": tier(decayed_heat),
+        "tier": current_tier,
         "confidence": confidence,
         "uses": uses,
         "last_used": last_used,
-        "expanded": expanded,
+        "expanded": expanded if current_tier == "HOT" else None,
     }
 
 

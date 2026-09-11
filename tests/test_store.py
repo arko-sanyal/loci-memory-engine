@@ -185,6 +185,27 @@ def test_lower_trust_challenger_is_rejected_against_a_confident_incumbent(conn):
     assert current[0]["value"] == "Dhaka"  # untouched
 
 
+def test_get_entity_includes_expanded_when_hot(conn):
+    remember_entity(conn, "e", expanded="a long detailed explanation", now=1000.0)
+    touch_entity(conn, "e", hop=0, now=1000.0)  # 0.333 -> 0.6665, still MILD
+    touch_entity(conn, "e", hop=0, now=1000.0)  # 0.6665 -> 0.83325, now HOT
+
+    entity = get_entity(conn, "e", now=1000.0)
+
+    assert entity["tier"] == "HOT"
+    assert entity["expanded"] == "a long detailed explanation"
+
+
+def test_get_entity_omits_expanded_when_not_hot(conn):
+    remember_entity(conn, "e", expanded="a long detailed explanation", now=1000.0)
+    # freshly remembered: heat 0.333, tier MILD
+
+    entity = get_entity(conn, "e", now=1000.0)
+
+    assert entity["tier"] == "MILD"
+    assert entity["expanded"] is None
+
+
 def test_get_fact_history_orders_by_valid_from(conn):
     remember_entity(conn, "e", now=1000.0)
     add_fact(conn, "e", "k", "v1", source=UserStated("v1"), now=1000.0)
